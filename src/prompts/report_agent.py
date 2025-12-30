@@ -1,5 +1,6 @@
 # src/prompts/report_agent.py
 from datetime import datetime
+from typing import Optional
 from .isq_prompt_generator import generate_isq_prompt_section
 
 def get_report_planner_base_instructions() -> str:
@@ -21,7 +22,7 @@ def get_report_editor_base_instructions() -> str:
 你应当确保报告符合专业的金融写作规范，且标题层级正确。"""
 
 # 1. 策划阶段 (Structural Planning)
-def format_signal_for_report(signal: any, index: int) -> str:
+def format_signal_for_report(signal: any, index: int, cite_keys: Optional[list] = None) -> str:
     """格式化单个信号供研报生成使用"""
     # 这里的逻辑从 ReportAgent._format_signal_input 迁移过来
     from schema.models import InvestmentSignal
@@ -46,6 +47,12 @@ def format_signal_for_report(signal: any, index: int) -> str:
     tickers = ", ".join([f"{t.get('name')}({t.get('ticker')})" for t in sig_obj.impact_tickers])
     if tickers:
         text += f"受影响标的: {tickers}\n"
+
+    # Stable bibliography-style citation keys (LaTeX/BibTeX-like)
+    if cite_keys:
+        joined = " ".join([f"[@{k}]" for k in cite_keys if k])
+        if joined:
+            text += f"引用: {joined}\n"
         
     return text
 
@@ -106,8 +113,8 @@ def get_report_writer_instructions(theme_title: str, signal_cluster_text: str, s
     query_context = f"\n**用户意图**: \"{user_query}\"\n请确保分析内容回应了用户的关注点。\n" if user_query else ""
     isq_block = generate_isq_prompt_section(include_header=False)
     
-    # 生成引用标记列表供提示
-    refs_guide = ", ".join([f"[[{i}]]" for i in signal_indices])
+    # Keep citation scheme stable across re-ordering / edits.
+    # Cite keys are provided in each signal block as: 引用: [@KEY]
 
     return f"""你是一位资深金融分析师。请针对核心主题 **"{theme_title}"** 撰写一篇深度研报章节。
     {query_context}
@@ -122,7 +129,9 @@ def get_report_writer_instructions(theme_title: str, signal_cluster_text: str, s
     ### 写作要求
     1. **叙事逻辑**: 不要罗列信号，要将这些信号编织成一个连贯的故事。先讲宏观/行业背景，再讲具体事件传导，最后落脚到个股/标的影响。
     2. **量化支撑**: 引用 ISQ 评分（确定性、强度、预期差）来佐证你的观点。关键观点必须关联相应的 ISQ 分值。
-    3. **引用规范**: 即使多个信号属于同一主题，也必须准确引用来源。使用 {refs_guide} 格式。
+     3. **引用规范（稳定 CiteKey）**: 关键论断必须标注来源引用，使用 `[@CITE_KEY]` 格式。
+         - CiteKey 已在输入信号块中以 `引用: [@KEY]` 提供，请直接复制使用。
+         - 不要使用 `[[1]]` 这类不稳定编号。
     4. **关联标的预测**: **必须**在章节末尾明确给出受影响标的的预测分析，包括：
        - 至少列出 1-2 个相关上市公司代码（如 600519.SH）
        - 给出短期（T+3或T+5）的方向性判断
@@ -287,7 +296,7 @@ def get_report_editor_instructions(draft_sections: str, plan: str, sources_list:
     2. **连贯性**: 确保章节之间过渡自然。
     3. **完整性**:
        - 必须保留所有 `json-chart` 代码块（图表配置）。
-       - 必须保留引用标注 `[[编号]]`。
+         - 必须保留引用标注 `[@CITE_KEY]`。
        - 生成 `## 核心观点摘要`、`## 参考文献` 和 `## 风险提示`。
 
     ### 输出
@@ -305,7 +314,7 @@ def get_section_editor_instructions(section_index: int, total_sections: int, toc
 
     ### 你的任务
     1. 润色当前章节内容，确保逻辑清晰、语言专业。
-    2. 保留所有 `[[编号]](#ref编号)` 格式的引用。
+    2. 保留所有 `[@CITE_KEY](#ref-CITE_KEY)` 或 `[@CITE_KEY]` 格式的引用。
     3. 保留所有 `json-chart` 代码块，不做修改。
     4. 如果需要参考其他章节内容，使用 `search_context` 工具搜索。
     5. 只输出编辑后的章节内容，不要输出其他章节。
@@ -379,7 +388,7 @@ def get_final_assembly_instructions(sources_list: str) -> str:
     1. 生成 "## 参考文献" 章节（需要按照顺序，顺序不对时进行调整）：
     - 原始来源：
     {sources_list}
-    - 格式：`<a id="ref编号"></a>[编号] 标题 (来源), [链接地址]`
+    - 格式：`<a id="ref-CITE_KEY"></a>[@CITE_KEY] 标题 (来源), [链接地址]`
     2. 生成 "## 风险提示" (标准免责声明)。
     3. 生成 "## 快速扫描" 表格，汇总各主题的核心观点。
     - 表格列：**主题**, **核心观点**, **强度(Intensity)**, **确定性(Confidence)**。

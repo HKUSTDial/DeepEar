@@ -87,6 +87,13 @@ class SearchTools:
             return results_str
             
         except Exception as e:
+            if engine == "ddg":
+                logger.warning(f"⚠️ DDG search failed, falling back to baidu: {query} ({e})")
+                try:
+                    return self.search(query, engine="baidu", max_results=max_results, ttl=ttl)
+                except Exception as e2:
+                    logger.error(f"❌ Baidu fallback also failed for {query}: {e2}")
+
             logger.error(f"❌ Search failed for {query}: {e}")
             return f"Error occurred during search: {str(e)}"
 
@@ -296,6 +303,13 @@ class SearchTools:
             return normalized_results
             
         except Exception as e:
+            if engine == "ddg":
+                logger.warning(f"⚠️ DDG search_list failed, falling back to baidu: {query} ({e})")
+                try:
+                    return self.search_list(query, engine="baidu", max_results=max_results, ttl=ttl, enrich=enrich)
+                except Exception as e2:
+                    logger.error(f"❌ Baidu fallback (search_list) also failed for {query}: {e2}")
+
             logger.error(f"❌ Structured search failed for {query}: {e}")
             return []
 

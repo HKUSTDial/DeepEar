@@ -184,6 +184,54 @@ class DatabaseManager:
         cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
 
+    def lookup_reference_by_url(self, url: str) -> Optional[Dict[str, Any]]:
+        """Best-effort lookup of a source item by URL.
+
+        This is used to render a stable bibliography from DB-backed metadata.
+        It searches both `daily_news` and `search_detail`.
+        """
+        url = (url or "").strip()
+        if not url:
+            return None
+
+        cursor = self.conn.cursor()
+
+        try:
+            cursor.execute(
+                """
+                SELECT title, source, publish_time, crawl_time, url
+                FROM daily_news
+                WHERE url = ?
+                ORDER BY crawl_time DESC
+                LIMIT 1
+                """,
+                (url,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+        except Exception:
+            pass
+
+        try:
+            cursor.execute(
+                """
+                SELECT title, source, publish_time, crawl_time, url
+                FROM search_detail
+                WHERE url = ?
+                ORDER BY crawl_time DESC
+                LIMIT 1
+                """,
+                (url,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+        except Exception:
+            pass
+
+        return None
+
     def delete_news(self, news_id: str) -> bool:
         """删除特定新闻"""
         cursor = self.conn.cursor()

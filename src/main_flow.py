@@ -128,6 +128,7 @@ class SignalFluxWorkflow:
         query: Optional[str] = None,
         run_id: Optional[str] = None,
         resume: bool = False,
+        resume_from: str = "report",
         checkpoint_dir: str = "reports/checkpoints",
     ) -> Optional[str]:
         """执行完整工作流
@@ -155,17 +156,52 @@ class SignalFluxWorkflow:
             {
                 "run_id": run_id,
                 "resume": bool(resume),
+                "resume_from": resume_from,
                 "started_at": datetime.now().isoformat(),
                 "params": {"sources": sources, "wide": wide, "depth": depth, "query": query},
                 "status": "running",
             },
         )
 
+        # Fast resume: regenerate report from analyzed_signals without rerunning Trend/Analysis.
+        # Useful when you only want to validate report formatting after code changes.
+        if resume and resume_from == "analysis" and ckpt.exists("analyzed_signals.json"):
+            logger.info(f"♻️ Resuming from analysis checkpoint for run_id={run_id}: regenerating report...")
+            analyzed_signals = ckpt.load_json("analyzed_signals.json", default=[])
+            if not isinstance(analyzed_signals, list) or not analyzed_signals:
+                logger.warning("⚠️ analyzed_signals.json missing/empty; falling back to full run")
+            else:
+                result = self.report_agent.generate_report(analyzed_signals, user_query=query)
+                md_content = result.content if hasattr(result, "content") else str(result)
+                ckpt.save_text("report.md", md_content)
+
+                report_dir = "reports"
+                os.makedirs(report_dir, exist_ok=True)
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+                md_filename = f"{report_dir}/daily_report_{timestamp}.md"
+                with open(md_filename, "w", encoding="utf-8") as f:
+                    f.write(md_content)
+                html_filename = save_report_as_html(md_filename)
+                ckpt.save_json(
+                    "state.json",
+                    {
+                        "run_id": run_id,
+                        "status": "completed",
+                        "resumed_from": "analyzed_signals.json",
+                        "finished_at": datetime.now().isoformat(),
+                        "output": html_filename or md_filename,
+                    },
+                )
+                return html_filename or md_filename
+
         if sources is None:
             sources = ["all"]
 
         # Fast resume paths
-        if resume and ckpt.exists("report.md"):
+        # resume_from:
+        # - "report": reuse report.md (fastest)
+        # - "analysis": reuse analyzed_signals.json but regenerate report fresh
+        if resume and resume_from == "report" and ckpt.exists("report.md"):
             logger.info(f"♻️ Resuming: found final report checkpoint for run_id={run_id}")
             report_md = ckpt.load_text("report.md")
             if report_md:
@@ -176,7 +212,15 @@ class SignalFluxWorkflow:
                 with open(md_filename, "w", encoding="utf-8") as f:
                     f.write(report_md)
                 html_filename = save_report_as_html(md_filename)
-                ckpt.save_json("state.json", {"run_id": run_id, "status": "completed", "resumed_from": "report.md", "finished_at": datetime.now().isoformat()})
+                ckpt.save_json(
+                    "state.json",
+                    {
+                        "run_id": run_id,
+                        "status": "completed",
+                        "resumed_from": "report.md",
+                        "finished_at": datetime.now().isoformat(),
+                    },
+                )
                 return html_filename or md_filename
             
         logger.info("--- Step 1: Trend Discovery ---")
@@ -408,6 +452,13 @@ if __name__ == "__main__":
                         help="User query/intent (optional)")
     parser.add_argument("--run-id", type=str, default=None, help="Run id for logs/checkpoints (default: timestamp)")
     parser.add_argument("--resume", action="store_true", help="Resume from latest (or --run-id) checkpoint")
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        default="report",
+        choices=["report", "analysis"],
+        help="When --resume is set: 'report' reuses report.md; 'analysis' regenerates report from analyzed_signals.json",
+    )
     parser.add_argument("--checkpoint-dir", type=str, default="reports/checkpoints", help="Checkpoint base dir")
     parser.add_argument("--log-dir", type=str, default="logs", help="Log directory")
     parser.add_argument("--log-level", type=str, default="DEBUG", help="Log level (INFO/DEBUG/...) ")
@@ -426,7 +477,11 @@ if __name__ == "__main__":
     except ValueError:
         depth = args.depth
     
-    run_id = args.run_id or make_run_id()
+    # If resuming without explicit run-id, reuse the latest run directory
+    if args.resume and not args.run_id:
+        run_id = resolve_latest_run_id(args.checkpoint_dir) or make_run_id()
+    else:
+        run_id = args.run_id or make_run_id()
     log_path = setup_file_logging(run_id=run_id, log_dir=args.log_dir, level=args.log_level)
     logger.info(f"🧾 Log file: {log_path}")
 
@@ -439,6 +494,7 @@ if __name__ == "__main__":
             query=args.query,
             run_id=run_id,
             resume=bool(args.resume),
+            resume_from=args.resume_from,
             checkpoint_dir=args.checkpoint_dir,
         )
     except Exception as e:

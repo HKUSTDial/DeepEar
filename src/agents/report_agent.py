@@ -97,6 +97,152 @@ class ReportAgent:
         return self._forecast_agent
 
     @staticmethod
+    def _make_cite_key(url: str, title: str = "", source_name: str = "") -> str:
+        basis = (url or "").strip() or f"{(title or '').strip()}|{(source_name or '').strip()}"
+        digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:8]
+        return f"SF-{digest}"
+
+    def _build_bibliography(self, signals: List[Any]) -> tuple[list[Dict[str, Any]], Dict[int, list[str]]]:
+        """Build stable bibliography entries and per-signal cite key mapping.
+
+        Returns:
+            bib_entries: ordered unique entries: [{key,url,title,source,publish_time}]
+            signal_to_keys: {signal_index(1-based): [key1,key2,...]}
+        """
+        bib_by_key: Dict[str, Dict[str, Any]] = {}
+        signal_to_keys: Dict[int, list[str]] = {}
+
+        for sig_idx, signal in enumerate(signals, 1):
+            source_items: list[Dict[str, Any]] = []
+
+            if hasattr(signal, "sources") and getattr(signal, "sources"):
+                source_items = list(getattr(signal, "sources") or [])
+            elif isinstance(signal, dict) and signal.get("sources"):
+                # analyzed_signals are dicts; their sources are nested under the `sources` key
+                src_list = signal.get("sources")
+                if isinstance(src_list, list) and src_list:
+                    source_items = list(src_list)
+            elif isinstance(signal, dict):
+                # Treat raw signals as single-source entries
+                if signal.get("url") or signal.get("title"):
+                    source_items = [
+                        {
+                            "title": signal.get("title"),
+                            "url": signal.get("url"),
+                            "source_name": signal.get("source") or signal.get("source_name"),
+                            "publish_time": signal.get("publish_time"),
+                        }
+                    ]
+
+            if not source_items:
+                continue
+
+            for src in source_items:
+                url = (src.get("url") or "").strip()
+                title = (src.get("title") or "").strip()
+                source_name = (src.get("source_name") or src.get("source") or "").strip()
+                publish_time = (src.get("publish_time") or "").strip() if isinstance(src.get("publish_time"), str) else src.get("publish_time")
+
+                key = self._make_cite_key(url=url, title=title, source_name=source_name)
+                signal_to_keys.setdefault(sig_idx, [])
+                if key not in signal_to_keys[sig_idx]:
+                    signal_to_keys[sig_idx].append(key)
+
+                if key in bib_by_key:
+                    continue
+
+                # Prefer canonical metadata from DB when possible
+                enriched = self.db.lookup_reference_by_url(url) if url else None
+                bib_by_key[key] = {
+                    "key": key,
+                    "url": url or (enriched.get("url") if enriched else ""),
+                    "title": (enriched.get("title") if enriched else None) or title or "（无标题）",
+                    "source": (enriched.get("source") if enriched else None) or source_name or "（未知来源）",
+                    "publish_time": (enriched.get("publish_time") if enriched else None) or publish_time or "",
+                }
+
+        return list(bib_by_key.values()), signal_to_keys
+
+    @staticmethod
+    def _render_references_section(bib_entries: list[Dict[str, Any]], key_to_num: Dict[str, int]) -> str:
+        lines = ["## 参考文献", ""]
+        if not bib_entries:
+            lines.append("（无）")
+            return "\n".join(lines).strip() + "\n"
+
+        for entry in bib_entries:
+            key = entry.get("key")
+            num = key_to_num.get(key) if key else None
+            title = entry.get("title") or "（无标题）"
+            source = entry.get("source") or "（未知来源）"
+            url = entry.get("url") or ""
+            publish_time = entry.get("publish_time") or ""
+            suffix = ""
+            if publish_time:
+                suffix = f"，{publish_time}"
+            label = f"[{num}]" if isinstance(num, int) else "[?]"
+            if url:
+                lines.append(f"<a id=\"ref-{key}\"></a>{label} {title} ({source}{suffix}), {url}")
+            else:
+                lines.append(f"<a id=\"ref-{key}\"></a>{label} {title} ({source}{suffix})")
+
+        return "\n".join(lines).strip() + "\n"
+
+    @staticmethod
+    def _inject_references(report_md: str, references_md: str) -> str:
+        # Replace existing references section, if any
+        pattern = re.compile(r"(?ms)^##\s*参考文献\s*$.*?(?=^##\s|\Z)")
+        if pattern.search(report_md or ""):
+            return pattern.sub(references_md.strip() + "\n\n", report_md).strip()
+
+        # Otherwise append at end
+        return (report_md or "").rstrip() + "\n\n" + references_md.strip() + "\n"
+
+    @staticmethod
+    def _normalize_citations(report_md: str, signal_to_keys: Dict[int, list[str]], key_to_num: Dict[str, int]) -> str:
+        text = report_md or ""
+
+        # Convert legacy [[n]] to the first available cite key for that signal.
+        def repl_legacy(match: re.Match) -> str:
+            idx = int(match.group(1))
+            keys = signal_to_keys.get(idx) or []
+            if not keys:
+                return match.group(0)
+            key = keys[0]
+            num = key_to_num.get(key)
+            label = f"[{num}]" if isinstance(num, int) else "[?]"
+            return f"{label}(#ref-{key})"
+
+        text = re.sub(r"\[\[(\d+)\]\]", repl_legacy, text)
+
+        # Convert cite keys to numbered display while keeping stable anchor: [@KEY] -> [N](#ref-KEY)
+        def repl_key(match: re.Match) -> str:
+            key = match.group("key")
+            num = key_to_num.get(key)
+            label = f"[{num}]" if isinstance(num, int) else "[?]"
+            return f"{label}(#ref-{key})"
+
+        text = re.sub(r"\[@(?P<key>[A-Za-z0-9][A-Za-z0-9:_\-]{0,64})\](?!\()", repl_key, text)
+
+        # Convert loose cite markers like: （@SF-xxxxxxxx） / (@SF-xxxxxxxx)
+        # These sometimes appear when the model forgets the bracket form.
+        def repl_loose_key(match: re.Match) -> str:
+            lparen = match.group("lparen")
+            rparen = match.group("rparen")
+            key = match.group("key")
+            num = key_to_num.get(key)
+            label = f"[{num}]" if isinstance(num, int) else "[?]"
+            return f"{lparen}{label}(#ref-{key}){rparen}"
+
+        text = re.sub(
+            r"(?P<lparen>[\(\（])\s*@(?P<key>SF-[0-9a-fA-F]{8})\s*(?P<rparen>[\)\）])",
+            repl_loose_key,
+            text,
+        )
+
+        return text
+
+    @staticmethod
     def _clean_ticker(ticker_raw: str) -> str:
         t = (ticker_raw or "").strip()
         if not t:
@@ -149,6 +295,16 @@ class ReportAgent:
 
         for match in pattern.finditer(text):
             json_str = match.group(1).strip()
+            json_str = (
+                json_str.replace("\u201c", '"')
+                .replace("\u201d", '"')
+                .replace("\u2018", "'")
+                .replace("\u2019", "'")
+                .replace("“", '"')
+                .replace("”", '"')
+                .replace("‘", "'")
+                .replace("’", "'")
+            )
             cfg = extract_json(json_str)
             if not cfg:
                 continue
@@ -301,8 +457,78 @@ class ReportAgent:
         - If a closing fence already exists after the JSON object, leave as-is.
         """
 
-        if not text or "```json-chart" not in text:
+        if not text:
             return text
+
+        # Phase 0: Normalize malformed json-chart fences.
+        # We only touch fences in/around json-chart blocks to avoid modifying other markdown.
+        if "json-chart" in text:
+            lines = text.splitlines()
+            out_lines: list[str] = []
+            in_chart = False
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                stripped = line.strip()
+
+                if not in_chart:
+                    # Opening fence variants
+                    if stripped in ("```json-chart", "``json-chart", "``` json-chart", "`` json-chart"):
+                        out_lines.append("```json-chart")
+                        in_chart = True
+                        i += 1
+                        continue
+
+                    # Variant: opening fence on its own line, language on next line.
+                    #   ```
+                    #   json-chart
+                    #   { ... }
+                    if stripped in ("```", "``") and i + 1 < len(lines) and lines[i + 1].strip() == "json-chart":
+                        out_lines.append("```json-chart")
+                        in_chart = True
+                        i += 2
+                        continue
+
+                    # Variant: opening fence appears at end of a content line.
+                    #   ...：   ```
+                    #   json-chart
+                    if stripped.endswith("```") and not stripped.startswith("```"):
+                        if i + 1 < len(lines) and lines[i + 1].strip() == "json-chart":
+                            prefix = line[: line.rfind("```")].rstrip()
+                            if prefix:
+                                out_lines.append(prefix)
+                            out_lines.append("```json-chart")
+                            in_chart = True
+                            i += 2
+                            continue
+
+                else:
+                    # Closing fence variants
+                    if stripped in ("```", "``"):
+                        out_lines.append("```")
+                        in_chart = False
+                        i += 1
+                        continue
+
+                    # Variant: closing fence appears on the same line after JSON.
+                    #   { ... } ```
+                    if "```" in line:
+                        pos = line.find("```")
+                        before = line[:pos].rstrip()
+                        after = line[pos + 3 :].strip()
+                        if before:
+                            out_lines.append(before)
+                        out_lines.append("```")
+                        in_chart = False
+                        if after:
+                            out_lines.append(after)
+                        i += 1
+                        continue
+
+                out_lines.append(line)
+                i += 1
+
+            text = "\n".join(out_lines)
 
         def find_json_end(s: str, start_idx: int) -> Optional[int]:
             # find first '{'
@@ -337,6 +563,10 @@ class ReportAgent:
                     if depth == 0:
                         return j
             return None
+
+        # Phase 1: Repair missing closing fences for properly-opened blocks.
+        if "```json-chart" not in text:
+            return text
 
         out = []
         i = 0
@@ -433,10 +663,20 @@ class ReportAgent:
         if not clusters:
              clusters = [{"theme_title": (s.title if hasattr(s, 'title') else s.get('title', '')), "signal_ids": [i]} for i, s in enumerate(signals, 1)]
 
+        # Build stable bibliography keys first so Writer can cite deterministically
+        bib_entries, signal_to_keys = self._build_bibliography(signals)
+        key_to_num = {e.get("key"): i for i, e in enumerate(bib_entries, 1) if e.get("key")}
+
         # --- Phase 2: Writing Drafts based on Clusters ---
         sections = []
         sources_list_lines = []
         section_titles = []  # 存储 (anchor, title)
+
+        # Sources list shown to the LLM (even though final references are injected programmatically)
+        for entry in bib_entries:
+            sources_list_lines.append(
+                f"[@{entry.get('key')}] {entry.get('title')} ({entry.get('source')}), {entry.get('url') or 'N/A'}"
+            )
         
         for i, cluster in enumerate(clusters, 1):
             theme_title = cluster.get("theme_title", f"主题 {i}")
@@ -457,15 +697,8 @@ class ReportAgent:
                     
                 signal = signals[sig_idx-1]
                 
-                # 收集 Sources
-                if hasattr(signal, 'sources'):
-                    for src in signal.sources:
-                        sources_list_lines.append(f"[{sig_idx}] {src.get('title')} ({src.get('source_name')}), {src.get('url', 'N/A')}")
-                elif isinstance(signal, dict) and 'source' in signal:
-                    sources_list_lines.append(f"[{sig_idx}] {signal.get('title')} ({signal.get('source')}), {signal.get('url', 'N/A')}")
-                
                 # 聚合信号文本
-                cluster_signals_text += format_signal_for_report(signal, sig_idx) + "\n"
+                cluster_signals_text += format_signal_for_report(signal, sig_idx, cite_keys=signal_to_keys.get(sig_idx, [])) + "\n"
                 
                 # 聚合行情 Context (去重)
                 analysis_text = getattr(signal, 'analysis', '') if not isinstance(signal, dict) else signal.get('analysis', '')
@@ -526,7 +759,7 @@ class ReportAgent:
         
         if use_incremental:
             logger.info(f"🔄 Using INCREMENTAL editing mode (sections={len(sections)})...")
-            final_response_content = self._incremental_edit(sections, sources_list_text, section_titles)
+            final_response_content = self._incremental_edit(sections, sources_list_text, section_titles, bib_entries=bib_entries, signal_to_keys=signal_to_keys)
         else:
             # --- Phase 3: Global Planning (The Planner) ---
             # 虽然已经聚类，但全局 Planner 仍有助于调整章节顺序和识别分歧
@@ -574,6 +807,13 @@ class ReportAgent:
                 logger.error(f"Final editing failed: {e}")
                 final_response_content = f"# 研报生成失败\n\n{e}"
 
+            # Normalize citations + inject programmatic bibliography
+            final_response_content = self._normalize_citations(final_response_content, signal_to_keys)
+            final_response_content = self._inject_references(
+                final_response_content,
+                self._render_references_section(bib_entries, key_to_num),
+            )
+
         # 清理 Markdown 标记
         final_response_content = final_response_content.strip()
         if final_response_content.startswith("```markdown"):
@@ -595,6 +835,13 @@ class ReportAgent:
         
         # Fix duplicate headers (e.g. "#### #### Title") caused by LLM stutter
         final_response_content = re.sub(r'(#{1,6})\s+\1', r'\1', final_response_content)
+
+        # Normalize citations + inject programmatic bibliography (incremental path may also pass through here)
+        final_response_content = self._normalize_citations(final_response_content, signal_to_keys, key_to_num)
+        final_response_content = self._inject_references(
+            final_response_content,
+            self._render_references_section(bib_entries, key_to_num),
+        )
         
         # --- Phase 5: Visualization Processing ---
         logger.info("🎨 Processing visualization...")
@@ -618,7 +865,14 @@ class ReportAgent:
             text = text[:-3].strip()
         return text
 
-    def _incremental_edit(self, sections: List[str], sources_list_text: str, section_titles_data: List[tuple] = None) -> str:
+    def _incremental_edit(
+        self,
+        sections: List[str],
+        sources_list_text: str,
+        section_titles_data: List[tuple] = None,
+        bib_entries: Optional[list[Dict[str, Any]]] = None,
+        signal_to_keys: Optional[Dict[int, list[str]]] = None,
+    ) -> str:
         """增量编辑模式"""
         # 1. 填充 RAG
         draft_docs = []
@@ -680,6 +934,10 @@ class ReportAgent:
         try:
             tail_response = self.editor.run("请生成参考文献、风险提示和快速扫描表格。")
             tail_content = self._clean_markdown(tail_response.content)
+            # Some models (or fallback templates) may accidentally indent headings, turning them into code blocks.
+            tail_content = re.sub(r'(?m)^[ \t]+(#{1,6}\s+)', r'\1', tail_content)
+            # And sometimes they indent whole sections (e.g. 12 spaces). Tail is expected to be prose/tables, not code.
+            tail_content = re.sub(r'(?m)^[ \t]{4,}(?=\S)', '', tail_content)
 
             # Guardrail: some models ask the user for more info instead of generating the required sections.
             bad_markers = ["为了完成您的请求", "我需要您提供", "请您提供", "请提供必要的细节"]
@@ -704,6 +962,14 @@ class ReportAgent:
                 + "## 风险提示\n\n"
                 + "本报告由 AI 自动生成，仅供参考，不构成投资建议。\n"
             )
+
+        # Programmatically inject references to avoid LLM instability
+        try:
+            bib_entries_safe = bib_entries or []
+            key_to_num = {e.get("key"): i for i, e in enumerate(bib_entries_safe, 1) if e.get("key")}
+            other_tail = self._inject_references(other_tail, self._render_references_section(bib_entries_safe, key_to_num))
+        except Exception as e:
+            logger.debug(f"Failed to inject references programmatically: {e}")
         
         # 5. 组装最终报告
         current_date = datetime.now().strftime('%Y-%m-%d')
@@ -746,6 +1012,11 @@ class ReportAgent:
 """
         # Fix duplicate headers (e.g. "#### #### Title") caused by LLM stutter
         final_report = re.sub(r'(#{1,6})\s+\1', r'\1', final_report)
+
+        # Normalize citations for final report
+        bib_entries_safe = bib_entries or []
+        key_to_num = {e.get("key"): i for i, e in enumerate(bib_entries_safe, 1) if e.get("key")}
+        final_report = self._normalize_citations(final_report, signal_to_keys or {}, key_to_num)
         
         # 移除连续的空行（最多保留2个）
         final_report = re.sub(r'\n{4,}', '\n\n\n', final_report)
@@ -1146,7 +1417,7 @@ class ReportAgent:
             lambda m: (
                 '\n<p style="text-align:center;color:#b45309;font-size:13px;'
                 'background:#fffbeb;padding:10px;border:1px dashed #f59e0b;border-radius:8px;">'
-                f'⚠️ 暂不支持该股票代码的预测渲染：{m.group(1).strip()}（仅支持 A 股 6 位 / 港股 5 位数字代码）。'
+                f'⚠️ 暂不支持该股票代码：{m.group(1).strip()}。'
                 '</p>\n'
             ),
             new_content,

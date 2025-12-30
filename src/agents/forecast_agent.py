@@ -67,7 +67,9 @@ class ForecastAgent:
             logger.warning(f"⚠️ No history data for {ticker} after sync")
             return None
 
-        min_lookback = max(10, min(lookback, 20))
+        # Absolute minimum history needed to produce a reasonable forecast.
+        # If we have fewer than this, forecasting is likely unstable.
+        min_lookback = 10
         effective_lookback = lookback
         if len(df) < lookback:
             if len(df) < min_lookback:
