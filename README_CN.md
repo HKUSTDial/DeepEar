@@ -250,6 +250,34 @@ uv run pytest src/tests/
 
 ---
 
+## 🙏 致谢
+
+特别感谢以下项目和社区提供的灵感与核心技术支持：
+
+- **[Agno](https://github.com/agno-agi/agno)**: 提供强大的多智能体协作框架。
+- **[Kronos](https://github.com/shiyu-coder/Kronos)**: 提供高性能的时间序列基础模型。
+- **[NewsNow](https://github.com/ourongxing/newsnow)**: 提供全方位的新闻数据抓取能力。
+- **[DeepFund](https://github.com/HKUSTDial/DeepFund)**: 提供先进的金融分析方法论与研究支持。
+
+---
+
+## 📜 引用
+
+如果您觉得这个项目对您的研究或应用有所帮助，请考虑引用：
+
+```bibtex
+@misc{signalflux2026,
+  author = {Runke Ruan},
+  title = {SignalFlux: An Extensible Framework for Financial Signal Extraction and News-Aware Forecasting},
+  year = {2026},
+  publisher = {GitHub},
+  journal = {GitHub Repository},
+  howpublished = {\url{https://github.com/rkiding/SignalFlux}}
+}
+```
+
+---
+
 ## 📄 开源协议
 
 本项目采用 MIT 协议开源。详情请见 `LICENSE` 文件。

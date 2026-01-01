@@ -179,7 +179,7 @@ One of the core innovations in SignalFlux is the integration of a **few-shot new
   <p><i>The news-aware projection mechanism: mapping semantic embeddings to the model's latent space.</i></p>
 </div>
 
-- **Projection Layer**: A lightweight linear layer that maps 384-dimensional SentenceTransformer embeddings to the 512-dimensional hidden state of Kronos.
+- **Projection Layer**: A lightweight linear layer that maps SentenceTransformer embeddings to the hidden state of Kronos.
 - **Global Shift**: The projected news bias is added to the hidden representation across all time steps, shifting the model's "latent expectation" before final prediction.
 - **Training**: Fine-tuned on a synthetic dataset of historical news-shock pairs verified by LLM reasoning.
 
@@ -247,6 +247,34 @@ Contributions are welcome! Please feel free to verify the `docs/guide.md` for ar
 3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
 4.  Push to the Branch (`git push origin feature/AmazingFeature`)
 5.  Open a Pull Request
+
+---
+
+## 🙏 Acknowledgements
+
+Special thanks to the following projects and communities for their inspiration and core technologies:
+
+- **[Agno](https://github.com/agno-agi/agno)**: For providing the robust multi-agent framework.
+- **[Kronos](https://github.com/shiyu-coder/Kronos)**: For the high-performance time-series foundation model.
+- **[NewsNow](https://github.com/ourongxing/newsnow)**: For the comprehensive news collection capabilities.
+- **[DeepFund](https://github.com/HKUSTDial/DeepFund)**: For the advanced financial analysis methodology and research.
+
+---
+
+## 📜 Citation
+
+If you find this project useful in your research or applications, please consider citing it:
+
+```bibtex
+@misc{signalflux2026,
+  author = {Runke Ruan},
+  title = {SignalFlux: An Extensible Framework for Financial Signal Extraction and News-Aware Forecasting},
+  year = {2026},
+  publisher = {GitHub},
+  journal = {GitHub Repository},
+  howpublished = {\url{https://github.com/rkiding/SignalFlux}}
+}
+```
 
 ---
 
