@@ -75,8 +75,8 @@ class ContentExtractor:
             "Accept": "application/json"
         }
         
-        # 检查是否有 API Key
-        api_key = os.getenv("JINA_READER_KEY")
+        # 使用统一的 JINA_API_KEY
+        api_key = os.getenv("JINA_API_KEY")
         has_api_key = bool(api_key and api_key.strip())
         
         if has_api_key:

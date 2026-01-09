@@ -97,6 +97,7 @@ SignalFlux 专为金融分析师、量化研究员和个人投资者设计，旨
     - `LLM_PROVIDER`: `openrouter`, `openai`, `ollama`, `deepseek` 等。
     - `REASONING_MODEL_ID`: 用于复杂分析的模型 (推荐 `gpt-4o`)。
     - `TOOL_MODEL_ID`: 用于工具调用的模型 (推荐 `qwen2.5`)。
+    - `JINA_API_KEY`: (可选) 统一的 Jina API Key，同时支持搜索 (s.jina.ai) 和内容提取 (r.jina.ai)。
 
 ### 运行
 

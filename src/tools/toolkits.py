@@ -378,7 +378,10 @@ class SearchToolkit(Toolkit):
     """
     搜索工具包 - 包装 SearchTools 为 Agno Toolkit
     
-    提供网络搜索功能（支持 DuckDuckGo 和百度）
+    提供网络搜索功能（支持 Jina、DuckDuckGo 和百度）
+    
+    当环境变量 JINA_API_KEY 设置时，默认使用 Jina Search，
+    提供 LLM 友好的搜索结果。
     """
     
     def __init__(self, db: DatabaseManager, **kwargs):
@@ -390,13 +393,17 @@ class SearchToolkit(Toolkit):
         ]
         super().__init__(name="search_toolkit", tools=tools, **kwargs)
 
-    def web_search(self, query: str, engine: str = "ddg", max_results: int = 5) -> str:
+    def web_search(self, query: str, engine: str = None, max_results: int = 5) -> str:
         """
         使用指定搜索引擎执行网络搜索。
         
         Args:
             query: 搜索关键词，如 "英伟达财报" 或 "光伏行业政策"。
-            engine: 搜索引擎选择。可选值: "ddg" (DuckDuckGo), "baidu" (百度)。
+            engine: 搜索引擎选择。可选值: 
+                    "jina" (Jina Search，需配置 JINA_API_KEY，LLM友好输出),
+                    "ddg" (DuckDuckGo，推荐英文/国际搜索), 
+                    "baidu" (百度，推荐中文/国内搜索)。
+                    默认: 若配置了 JINA_API_KEY 则使用 "jina"，否则 "ddg"。
             max_results: 返回结果数量。默认 5。
         
         Returns:

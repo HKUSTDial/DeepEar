@@ -96,6 +96,7 @@ SignalFlux is designed for financial analysts, quantitative researchers, and ind
    - `LLM_PROVIDER`: `openrouter`, `openai`, `ollama`, `deepseek`, etc.
    - `REASONING_MODEL_ID`: Model for complex analysis (e.g., `gpt-4o`).
    - `TOOL_MODEL_ID`: Model for tool usage (e.g., `qwen2.5`).
+   - `JINA_API_KEY`: (Optional) Unified Jina API key for both web search (s.jina.ai) and content extraction (r.jina.ai).
 
 ### Run
 
