@@ -1,15 +1,16 @@
 import { useDashboardStore, type HistoryItem } from '../store'
 import { useState } from 'react'
-import { Clock, RotateCcw, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
+import { Clock, RotateCcw, Trash2, ChevronDown, ChevronRight, GitBranch, History, Check, X, Ban, Loader2 } from 'lucide-react'
 import './HistoryPanel.css'
 
 interface Props {
     onSelectRun: (runId: string) => void
     onRerun: (runId: string) => void
+    onUpdate: (runId: string) => void
     onDelete: (runId: string) => void
 }
 
-export function HistoryPanel({ onSelectRun, onRerun, onDelete }: Props) {
+export function HistoryPanel({ onSelectRun, onRerun, onUpdate, onDelete }: Props) {
     const { queryGroups, history } = useDashboardStore()
     const [expandedQueries, setExpandedQueries] = useState<Set<string>>(new Set())
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
@@ -42,8 +43,10 @@ export function HistoryPanel({ onSelectRun, onRerun, onDelete }: Props) {
 
     const getStatusBadge = (status: string) => {
         switch (status) {
-            case 'completed': return <span className="status-badge completed">✓</span>
-            case 'failed': return <span className="status-badge failed">✗</span>
+            case 'completed': return <span className="status-badge completed"><Check size={12} /></span>
+            case 'failed': return <span className="status-badge failed"><X size={12} /></span>
+            case 'cancelled': return <span className="status-badge cancelled"><Ban size={12} /></span>
+            case 'cancelling': return <span className="status-badge cancelled"><Loader2 size={12} className="spin" /></span>
             case 'running': return <span className="status-badge running">●</span>
             default: return null
         }
@@ -52,7 +55,7 @@ export function HistoryPanel({ onSelectRun, onRerun, onDelete }: Props) {
     return (
         <div className="history-panel">
             <div className="history-header">
-                <span className="history-title">📜 历史记录</span>
+                <span className="history-title"><History size={14} style={{ marginRight: 6 }} />历史记录</span>
                 <div className="view-toggle">
                     <button
                         className={viewMode === 'grouped' ? 'active' : ''}
@@ -97,6 +100,7 @@ export function HistoryPanel({ onSelectRun, onRerun, onDelete }: Props) {
                                                 item={run}
                                                 onSelect={onSelectRun}
                                                 onRerun={onRerun}
+                                                onUpdate={onUpdate}
                                                 onDelete={handleDelete}
                                                 showDeleteConfirm={showDeleteConfirm === run.run_id}
                                                 formatDuration={formatDuration}
@@ -126,6 +130,7 @@ export function HistoryPanel({ onSelectRun, onRerun, onDelete }: Props) {
                                 item={item}
                                 onSelect={onSelectRun}
                                 onRerun={onRerun}
+                                onUpdate={onUpdate}
                                 onDelete={handleDelete}
                                 showDeleteConfirm={showDeleteConfirm === item.run_id}
                                 formatDuration={formatDuration}
@@ -144,6 +149,7 @@ interface HistoryRowProps {
     item: HistoryItem
     onSelect: (runId: string) => void
     onRerun: (runId: string) => void
+    onUpdate: (runId: string) => void
     onDelete: (runId: string) => void
     showDeleteConfirm: boolean
     formatDuration: (seconds: number | null) => string
@@ -152,9 +158,13 @@ interface HistoryRowProps {
 }
 
 function HistoryRow({
-    item, onSelect, onRerun, onDelete, showDeleteConfirm,
+    item, onSelect, onRerun, onUpdate, onDelete, showDeleteConfirm,
     formatDuration, getStatusBadge, showQuery
 }: HistoryRowProps) {
+    // Show indentation if it's an update (simple heuristic: if parent_run_id exists, though HistoryItem might not expose it yet in UI types, assuming DB returns it)
+    // Actually we need to add parent_run_id to store.ts/HistoryItem first.
+    // Assuming backend returns it.
+
     return (
         <div className="history-row" onClick={() => onSelect(item.run_id)}>
             <div className="row-main">
@@ -167,11 +177,19 @@ function HistoryRow({
                         <span>·</span>
                         <span>{formatDuration(item.duration_seconds)}</span>
                         <span>·</span>
-                        <span>{item.signal_count} 信号</span>
+                        <span className={item.status === 'cancelled' ? 'text-cancelled' : item.status === 'failed' ? 'text-failed' : ''}>
+                            {item.status === 'cancelled' ? '已取消' :
+                                item.status === 'failed' ? '失败' :
+                                    item.status === 'cancelling' ? '取消中...' :
+                                        `${item.signal_count} 信号`}
+                        </span>
                     </div>
                 </div>
             </div>
             <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+                <button className="action-btn" onClick={() => onUpdate(item.run_id)} title="基于此版本更新">
+                    <GitBranch size={14} />
+                </button>
                 <button className="action-btn" onClick={() => onRerun(item.run_id)} title="重新运行">
                     <RotateCcw size={14} />
                 </button>
