@@ -1,5 +1,5 @@
 """
-SignalFlux Dashboard - 数据库操作
+AlphaEar Dashboard - 数据库操作
 """
 import sqlite3
 from datetime import datetime, timedelta
@@ -40,6 +40,20 @@ class DashboardDB:
             )
         """)
         
+        # 自动迁移：检查并添加 parent_run_id 列
+        try:
+            cursor.execute("ALTER TABLE dashboard_runs ADD COLUMN parent_run_id TEXT")
+            logger.info("Migrated database: added parent_run_id column")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
+        
+        # 自动迁移：添加 run_data_json 列 (存储结构化数据)
+        try:
+            cursor.execute("ALTER TABLE dashboard_runs ADD COLUMN run_data_json TEXT")
+            logger.info("Migrated database: added run_data_json column")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
+        
         # 步骤日志表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS dashboard_steps (
@@ -66,9 +80,9 @@ class DashboardDB:
         """创建新运行记录"""
         cursor = self.conn.cursor()
         cursor.execute("""
-            INSERT INTO dashboard_runs (run_id, query, sources, status, started_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, (run.run_id, run.query, run.sources, run.status, run.started_at))
+            INSERT INTO dashboard_runs (run_id, query, sources, status, started_at, parent_run_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (run.run_id, run.query, run.sources, run.status, run.started_at, run.parent_run_id))
         self.conn.commit()
         return run
     
@@ -102,6 +116,32 @@ class DashboardDB:
         self.conn.commit()
         return cursor.rowcount > 0
     
+    def save_run_data(self, run_id: str, data: Dict[str, Any]) -> bool:
+        """保存运行的结构化数据 (signals, charts, graph)"""
+        import json
+        # Log what we're saving
+        logger.info(f"💾 Saving run_data for {run_id}: signals={len(data.get('signals', []))}, charts={len(data.get('charts', {}))}")
+        cursor = self.conn.cursor()
+        json_str = json.dumps(data, ensure_ascii=False, default=str)
+        cursor.execute(
+            "UPDATE dashboard_runs SET run_data_json = ? WHERE run_id = ?",
+            (json_str, run_id)
+        )
+        self.conn.commit()
+        result = cursor.rowcount > 0
+        logger.info(f"💾 Save result: {result}, JSON length: {len(json_str)}")
+        return result
+    
+    def get_run_data(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """获取运行的结构化数据"""
+        import json
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT run_data_json FROM dashboard_runs WHERE run_id = ?", (run_id,))
+        row = cursor.fetchone()
+        if row and row['run_data_json']:
+            return json.loads(row['run_data_json'])
+        return None
+    
     # ========== 步骤日志 ==========
     
     def add_step(self, step: DashboardStep) -> int:
@@ -130,7 +170,7 @@ class DashboardDB:
         """获取历史运行列表"""
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT run_id, query, status, started_at, finished_at, signal_count
+            SELECT run_id, query, status, started_at, finished_at, signal_count, parent_run_id, report_path
             FROM dashboard_runs
             ORDER BY started_at DESC
             LIMIT ?
@@ -184,7 +224,7 @@ class DashboardDB:
             
             # 获取该 query 的所有运行
             cursor.execute("""
-                SELECT run_id, query, status, started_at, finished_at, signal_count
+                SELECT run_id, query, status, started_at, finished_at, signal_count, parent_run_id, report_path
                 FROM dashboard_runs
                 WHERE query = ?
                 ORDER BY started_at DESC
@@ -206,6 +246,20 @@ class DashboardDB:
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT * FROM dashboard_runs WHERE status = 'running' ORDER BY started_at DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+        if row:
+            return DashboardRun(**dict(row))
+        return None
+
+    def get_latest_run_by_query(self, query: str) -> Optional[DashboardRun]:
+        """获取指定 query 的最新运行记录"""
+        if not query:
+            return None
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM dashboard_runs WHERE query = ? ORDER BY started_at DESC LIMIT 1",
+            (query,)
         )
         row = cursor.fetchone()
         if row:

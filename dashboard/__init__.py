@@ -1,1 +1,1 @@
-# SignalFlux Dashboard Package
+# AlphaEar Dashboard Package

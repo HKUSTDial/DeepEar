@@ -1,11 +1,11 @@
 """
-SignalFlux Dashboard 集成层
-将 Dashboard WebSocket 与真实 SignalFlux 工作流连接
+AlphaEar Dashboard 集成层
+将 Dashboard WebSocket 与真实 AlphaEar 工作流连接
 """
 import asyncio
 import threading
 from datetime import datetime
-from typing import Optional, Callable, Dict, Any, List
+from typing import Optional, Callable, Dict, Any, List, Union
 from loguru import logger
 from queue import Queue
 
@@ -85,12 +85,13 @@ dashboard_callback = DashboardCallback()
 class WorkflowRunner:
     """
     工作流运行器
-    在后台线程中执行 SignalFlux 工作流，同时通过 DashboardCallback 推送状态
+    在后台线程中执行 AlphaEar 工作流，同时通过 DashboardCallback 推送状态
     """
     
     def __init__(self):
         self._workflow = None
         self._running = False
+        self._cancelled = False
         self._thread: Optional[threading.Thread] = None
     
     def _ensure_workflow(self):
@@ -103,21 +104,57 @@ class WorkflowRunner:
     def is_running(self) -> bool:
         return self._running
     
+    def is_cancelled(self) -> bool:
+        return self._cancelled
+    
+    def cancel(self):
+        """请求取消当前工作流"""
+        if self._running:
+            self._cancelled = True
+            logger.info("⚠️ Workflow cancellation requested")
+            return True
+        return False
+    
+    def reset_cancel_flag(self):
+        """重置取消标志"""
+        self._cancelled = False
+    
     def run_async(
         self,
         query: Optional[str] = None,
         sources: List[str] = None,
         wide: int = 10,
+        depth: Union[int, str] = "auto",
         run_state: Any = None
     ):
         """在后台线程启动工作流"""
         if self._running:
             raise RuntimeError("Workflow already running")
         
+        self._cancelled = False  # Reset cancel flag
         self._running = True
         self._thread = threading.Thread(
             target=self._run_workflow,
-            args=(query, sources or ["financial"], wide, run_state),
+            args=(query, sources or ["financial"], wide, depth, run_state),
+            daemon=True
+        )
+        self._thread.start()
+
+    def update_run_async(
+        self,
+        base_run_id: str,
+        run_state: Any = None,
+        user_query: Optional[str] = None,
+        new_run_id: str = None
+    ):
+        """在后台线程启动更新工作流"""
+        if self._running:
+            raise RuntimeError("Workflow already running")
+        
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._run_update,
+            args=(base_run_id, run_state, user_query, new_run_id),
             daemon=True
         )
         self._thread.start()
@@ -127,15 +164,23 @@ class WorkflowRunner:
         query: Optional[str],
         sources: List[str],
         wide: int,
+        depth: Union[int, str],
         run_state: Any
     ):
         """实际执行工作流（在后台线程中）- 完整复制 main_flow.py 逻辑"""
         cb = dashboard_callback
         
+        def check_cancelled():
+            """检查是否已取消"""
+            if self._cancelled:
+                cb.step("warning", "System", "⚠️ 工作流已取消")
+                raise InterruptedError("Workflow cancelled by user")
+        
         try:
             # ========== Step 0: 初始化 ==========
+            check_cancelled()
             cb.phase("初始化", 5)
-            cb.step("system", "System", f"🚀 SignalFlux Workflow 启动")
+            cb.step("system", "System", f"🚀 AlphaEar Workflow 启动")
             cb.step("config", "System", f"Query: {query or '自动扫描'}, Sources: {sources}")
             
             workflow = self._ensure_workflow()
@@ -175,6 +220,7 @@ class WorkflowRunner:
             cb.phase("多源抓取", 15)
             successful_sources = []
             for source in actual_sources[:5]:  # 限制源数量
+                check_cancelled()  # 取消检查点
                 cb.step("tool_call", "TrendAgent", f"fetch_hot_news('{source}', count={wide})")
                 try:
                     result = workflow.trend_agent.news_toolkit.fetch_hot_news(source, count=wide)
@@ -197,6 +243,7 @@ class WorkflowRunner:
                     cb.step("thought", "TrendAgent", f"🔍 执行主动搜索: {search_queries[:2]}")
                     
                     for q in search_queries[:2]:  # 限制查询数
+                        check_cancelled()  # 取消检查点
                         cb.step("tool_call", "TrendAgent", f"search_list('{q}', max_results=5)  # 使用默认引擎")
                         try:
                             results = workflow.search_tools.search_list(q, max_results=5, enrich=True)  # 使用默认引擎
@@ -244,7 +291,7 @@ class WorkflowRunner:
             cb.phase("信号筛选", 35)
             cb.step("thought", "TrendAgent", f"🧠 使用 LLM 筛选 {len(raw_news)} 条新闻 (Query: {query or 'Auto'})...")
             
-            high_value_signals = workflow._llm_filter_signals(raw_news, 'auto', query)
+            high_value_signals = workflow._llm_filter_signals(raw_news, depth, query)
             cb.step("result", "TrendAgent", f"🎯 筛选出 {len(high_value_signals)} 个高价值信号")
             
             for sig in high_value_signals[:5]:
@@ -266,6 +313,7 @@ class WorkflowRunner:
             total = len(high_value_signals)
             
             for i, signal in enumerate(high_value_signals):
+                check_cancelled()  # 取消检查点
                 progress = 50 + int((i + 1) / total * 25)
                 cb.phase(f"分析信号 {i+1}/{total}", progress)
                 
@@ -283,6 +331,7 @@ class WorkflowRunner:
                 
                 try:
                     # 调用 FinAgent
+                    check_cancelled()  # LLM调用前检查点
                     sig_obj = workflow.fin_agent.analyze_signal(input_text, news_id=signal.get("id"))
                     
                     if sig_obj:
@@ -313,12 +362,23 @@ class WorkflowRunner:
                                 
                                 # 尝试获取价格数据推送图表
                                 try:
-                                    prices = workflow.trend_agent.stock_toolkit.get_stock_price(ticker_code, days=30)
-                                    if prices:
-                                        chart_data = self._format_chart_data(ticker_code, ticker_name, prices)
+                                    from datetime import timedelta
+                                    end_date = datetime.now().strftime('%Y-%m-%d')
+                                    start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+                                    # 使用底层 StockTools 获取 DataFrame，而非 Toolkit 的 markdown 输出
+                                    df = workflow.trend_agent.stock_toolkit._stock_tools.get_stock_price(ticker_code, start_date, end_date)
+                                    if df is not None and not df.empty:
+                                        # Pass full signal content for news-aware prediction
+                                        chart_data = self._format_chart_from_df(
+                                            ticker_code, 
+                                            ticker_name, 
+                                            df, 
+                                            news_text=input_text,
+                                            prediction_logic=sig_obj.summary
+                                        )
                                         cb.chart(ticker_code, chart_data)
-                                except:
-                                    pass
+                                except Exception as e:
+                                    logger.warning(f"Chart data fetch failed for {ticker_code}: {e}")
                         
                         # 传导链
                         if sig_obj.transmission_chain:
@@ -357,8 +417,11 @@ class WorkflowRunner:
             cb.step("thought", "ReportAgent", "规划报告结构 (Map-Reduce)...")
             
             try:
+                check_cancelled()  # 报告生成前检查点
                 result = workflow.report_agent.generate_report(analyzed_signals, user_query=query)
                 md_content = result.content if hasattr(result, "content") else str(result)
+                if run_state and hasattr(result, "structured"):
+                    run_state.report_structured = result.structured
                 
                 cb.step("thought", "ReportAgent", "生成章节内容...")
                 cb.step("thought", "ReportAgent", "渲染图表...")
@@ -379,23 +442,178 @@ class WorkflowRunner:
                 
                 cb.step("result", "ReportAgent", f"📄 报告已保存: {html_filename or md_filename}")
                 
+                 # 更新 run_state output (优先使用 HTML)
+                if run_state:
+                    run_state.output = html_filename or md_filename
+                
             except Exception as e:
                 cb.step("error", "ReportAgent", f"❌ 报告生成失败: {str(e)[:50]}")
             
             # 完成
             cb.phase("完成", 100)
-            cb.step("system", "System", "✅ SignalFlux 分析完成！")
+            cb.step("system", "System", "✅ AlphaEar 分析完成！")
             cb.step("result", "System", f"📊 信号: {len(analyzed_signals)} | 耗时: ~{datetime.now().strftime('%H:%M:%S')}")
             
             if run_state:
                 run_state.status = "completed"
+        
+        except InterruptedError:
+            # 用户取消
+            cb.step("warning", "System", "⚠️ 工作流已被用户取消")
+            if run_state:
+                run_state.status = "cancelled"
                 
         except Exception as e:
             cb.step("error", "System", f"❌ 工作流失败: {str(e)}")
             if run_state:
                 run_state.status = "failed"
+        
         finally:
             self._running = False
+            self._cancelled = False
+    def _run_update(self, base_run_id: str, run_state: Any, user_query: Optional[str], new_run_id: str = None):
+        """执行更新工作流 (Thread)"""
+        cb = dashboard_callback
+        try:
+            cb.phase("初始化", 5)
+            cb.step("system", "System", f"🚀 Starting Update for Run: {base_run_id}")
+            
+            workflow = self._ensure_workflow()
+            
+            # Use workflow.update_run which handles reloading signals and refreshing prices
+            cb.phase("刷新数据", 20)
+            cb.step("status", "System", "📡 Refreshing market data...")
+            
+            # We override workflow.update_run slightly or trust it to do the job.
+            # workflow.update_run returns the new run_id
+            generated_run_id = workflow.update_run(
+                base_run_id=base_run_id,
+                user_query=user_query,
+                new_run_id=new_run_id,
+                callback=cb
+            )
+            
+            if generated_run_id:
+                cb.phase("完成", 100)
+                cb.step("status", "System", f"✅ Update Completed. New Run ID: {generated_run_id}")
+                if run_state:
+                    run_state.status = "completed"
+                    # Update DB for the new run (update_run created it, but we might want to ensure status sync)
+                    # Actually workflow.update_run handles state.json and report generation.
+            else:
+                cb.step("error", "System", "❌ Update failed to produce a new run.")
+                if run_state:
+                    run_state.status = "failed"
+
+        except Exception as e:
+            cb.step("error", "System", f"❌ Update Workflow failed: {str(e)}")
+            if run_state:
+                run_state.status = "failed"
+        finally:
+            self._running = False
+    
+    def _format_chart_from_df(self, ticker: str, name: str, df, news_text: Optional[str] = None, prediction_logic: Optional[str] = None) -> dict:
+        """从 DataFrame 格式化价格数据为图表格式（推荐方法），包含预测"""
+        import pandas as pd
+        price_list = []
+        
+        # 取最近30条数据
+        df_recent = df.tail(30)
+        
+        for _, row in df_recent.iterrows():
+            try:
+                # 处理日期格式
+                date_val = row.get('date', '')
+                if hasattr(date_val, 'strftime'):
+                    date_str = date_val.strftime('%Y-%m-%d')
+                else:
+                    date_str = str(date_val)[:10]  # 确保只取日期部分
+                
+                price_list.append({
+                    "date": date_str,
+                    "open": float(row.get('open', 0)),
+                    "high": float(row.get('high', 0)),
+                    "low": float(row.get('low', 0)),
+                    "close": float(row.get('close', 0)),
+                    "volume": int(row.get('volume', 0))
+                })
+            except Exception as e:
+                logger.warning(f"Error formatting price row: {e}")
+                continue
+        
+        # 尝试获取 Kronos 预测
+        prediction = None
+        try:
+            from utils.kronos_predictor import KronosPredictorUtility
+            predictor = KronosPredictorUtility()
+            # Pass news_text to the predictor
+            forecast_points = predictor.get_base_forecast(df, lookback=20, pred_len=5, news_text=news_text)
+            if forecast_points and len(forecast_points) > 0:
+                # 计算预测涨跌幅
+                last_close = price_list[-1]["close"] if price_list else 0
+                if last_close > 0:
+                    pred_closes = [p.close for p in forecast_points]
+                    min_close = min(pred_closes)
+                    max_close = max(pred_closes)
+                    target_low = round(((min_close - last_close) / last_close) * 100, 1)
+                    target_high = round(((max_close - last_close) / last_close) * 100, 1)
+                    prediction = {
+                        "target_low": target_low,
+                        "target_high": target_high,
+                        "confidence": 65  # 基础模型置信度
+                    }
+                    logger.debug(f"Kronos prediction for {ticker}: {target_low}% ~ {target_high}%")
+        except Exception as e:
+            logger.warning(f"Kronos prediction failed for {ticker}: {e}")
+        
+        result = {
+            "ticker": ticker,
+            "name": name,
+            "prices": price_list
+        }
+        if prediction:
+            result["prediction"] = prediction
+            
+        # Serialize full forecast points for visualization if available
+        if 'forecast_points' in locals() and forecast_points:
+             try:
+                forecast_list = []
+                for p in forecast_points:
+                    forecast_list.append({
+                        "date": p.date, 
+                        "open": p.open,
+                        "high": p.high,
+                        "low": p.low,
+                        "close": p.close,
+                        "volume": p.volume
+                    })
+                result["forecast"] = forecast_list
+             except Exception as e:
+                 logger.warning(f"Failed to serialize forecast: {e}")
+
+        # Try to get base forecast (without news) if news_text is provided
+        if news_text:
+            try:
+                base_points = predictor.get_base_forecast(df, lookback=20, pred_len=5, news_text=None)
+                if base_points:
+                    base_list = []
+                    for p in base_points:
+                        base_list.append({
+                            "date": p.date,
+                            "open": p.open,
+                            "high": p.high,
+                            "low": p.low,
+                            "close": p.close,
+                            "volume": p.volume
+                        })
+                    result["forecast_base"] = base_list
+            except Exception as e:
+                logger.warning(f"Failed to get base forecast: {e}")
+
+        if prediction_logic:
+            result["prediction_logic"] = prediction_logic
+
+        return result
     
     def _format_chart_data(self, ticker: str, name: str, prices: Any) -> dict:
         """格式化价格数据为图表格式"""

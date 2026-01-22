@@ -1,9 +1,9 @@
 """
-SignalFlux Dashboard - 数据库模型
+AlphaEar Dashboard - 数据库模型
 存储运行历史和步骤日志
 """
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel
 
 
@@ -18,6 +18,7 @@ class DashboardRun(BaseModel):
     signal_count: int = 0
     report_path: Optional[str] = None
     error_message: Optional[str] = None
+    parent_run_id: Optional[str] = None  # Parent run ID for updates/versions
 
 
 class DashboardStep(BaseModel):
@@ -33,8 +34,9 @@ class DashboardStep(BaseModel):
 class RunRequest(BaseModel):
     """运行请求"""
     query: Optional[str] = None
-    sources: str = "financial"
+    sources: Union[str, List[str]] = "financial"
     wide: int = 10
+    depth: Union[int, str] = "auto"
 
 
 class RunResponse(BaseModel):
@@ -54,6 +56,8 @@ class HistoryItem(BaseModel):
     signal_count: int = 0
     duration_seconds: Optional[int] = None
     time_since_last_run: Optional[str] = None  # "2天前", "3小时前" 等
+    parent_run_id: Optional[str] = None
+    report_path: Optional[str] = None
 
 
 class QueryGroup(BaseModel):
