@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 
 export interface Step {
     step_type: string
@@ -20,6 +21,8 @@ export interface Signal {
     impact_tickers: Array<{ ticker: string; name: string; weight: number }>
     industry_tags: string[]
     transmission_chain: Array<{ node_name: string; impact_type: string; logic: string }>
+    reasoning: string
+    sources?: Array<{ title: string; url: string; source_name: string }>
 }
 
 export interface ChartData {
@@ -38,6 +41,23 @@ export interface ChartData {
         target_high: number
         confidence: number
     }
+    forecast?: Array<{
+        date: string
+        open: number
+        high: number
+        low: number
+        close: number
+        volume: number
+    }>
+    forecast_base?: Array<{
+        date: string
+        open: number
+        high: number
+        low: number
+        close: number
+        volume: number
+    }>
+    prediction_logic?: string
 }
 
 export interface HistoryItem {
@@ -49,6 +69,8 @@ export interface HistoryItem {
     signal_count: number
     duration_seconds: number | null
     time_since_last_run: string | null
+    parent_run_id?: string | null
+    report_path?: string | null
 }
 
 export interface QueryGroup {
@@ -102,86 +124,115 @@ interface DashboardState {
     addCompareTab: (runId: string, query: string) => void
     removeCompareTab: (index: number) => void
     setActiveTab: (index: number) => void
+
+    // Console 折叠状态
+    consoleCollapsed: boolean
+    setConsoleCollapsed: (collapsed: boolean) => void
 }
 
-export const useDashboardStore = create<DashboardState>((set) => ({
-    // 初始状态
-    connected: false,
-    setConnected: (connected) => set({ connected }),
+export const useDashboardStore = create<DashboardState>()(
+    persist(
+        (set) => ({
+            // 初始状态
+            connected: false,
+            setConnected: (connected) => set({ connected }),
 
-    runId: null,
-    status: 'idle',
-    phase: '',
-    progress: 0,
-    query: '',
+            runId: null,
+            status: 'idle',
+            phase: '',
+            progress: 0,
+            query: '',
 
-    steps: [],
-    signals: [],
-    charts: {},
-    graph: { nodes: [], edges: [] },
+            steps: [],
+            signals: [],
+            charts: {},
+            graph: { nodes: [], edges: [] },
 
-    history: [],
-    queryGroups: [],
+            history: [],
+            queryGroups: [],
 
-    compareTabs: [],
-    activeTabIndex: 0,
+            compareTabs: [],
+            activeTabIndex: 0,
 
-    // Actions
-    setQuery: (query) => set({ query }),
+            // Actions
+            setQuery: (query) => set({ query }),
 
-    setRunning: (runId) => set({
-        runId,
-        status: 'running',
-        steps: [],
-        signals: [],
-        charts: {},
-        graph: { nodes: [], edges: [] }
-    }),
+            setRunning: (runId) => set({
+                runId,
+                status: 'running',
+                steps: [],
+                signals: [],
+                charts: {},
+                graph: { nodes: [], edges: [] }
+            }),
 
-    setCompleted: () => set({ status: 'completed' }),
+            setCompleted: () => set({ status: 'completed' }),
 
-    setFailed: (_error) => set({ status: 'failed' }),
+            setFailed: (_error) => set({ status: 'failed' }),
 
-    addStep: (step) => set((state) => ({
-        steps: [...state.steps, step]
-    })),
+            addStep: (step) => set((state) => ({
+                steps: [...state.steps, step]
+            })),
 
-    addSignal: (signal) => set((state) => ({
-        signals: [...state.signals, signal]
-    })),
+            addSignal: (signal) => set((state) => ({
+                signals: [...state.signals, signal]
+            })),
 
-    updateChart: (ticker, data) => set((state) => ({
-        charts: { ...state.charts, [ticker]: data }
-    })),
+            updateChart: (ticker, data) => set((state) => ({
+                charts: { ...state.charts, [ticker]: data }
+            })),
 
-    updateGraph: (graph) => set({ graph }),
+            updateGraph: (graph) => set({ graph }),
 
-    updateProgress: (phase, progress) => set({ phase, progress }),
+            updateProgress: (phase, progress) => set({ phase, progress }),
 
-    setHistory: (history) => set({ history }),
+            setHistory: (history) => set({ history }),
 
-    setQueryGroups: (groups) => set({ queryGroups: groups }),
+            setQueryGroups: (groups) => set({ queryGroups: groups }),
 
-    reset: () => set({
-        runId: null,
-        status: 'idle',
-        phase: '',
-        progress: 0,
-        steps: [],
-        signals: [],
-        charts: {},
-        graph: { nodes: [], edges: [] }
-    }),
+            reset: () => set({
+                runId: null,
+                status: 'idle',
+                phase: '',
+                progress: 0,
+                steps: [],
+                signals: [],
+                charts: {},
+                graph: { nodes: [], edges: [] }
+            }),
 
-    // 对比模式
-    addCompareTab: (runId, query) => set((state) => ({
-        compareTabs: [...state.compareTabs, { runId, query }]
-    })),
+            // 对比模式
+            addCompareTab: (runId, query) => set((state) => ({
+                compareTabs: [...state.compareTabs, { runId, query }]
+            })),
 
-    removeCompareTab: (index) => set((state) => ({
-        compareTabs: state.compareTabs.filter((_, i) => i !== index),
-        activeTabIndex: Math.min(state.activeTabIndex, state.compareTabs.length - 2)
-    })),
+            removeCompareTab: (index) => set((state) => ({
+                compareTabs: state.compareTabs.filter((_, i) => i !== index),
+                activeTabIndex: Math.min(state.activeTabIndex, state.compareTabs.length - 2)
+            })),
 
-    setActiveTab: (index) => set({ activeTabIndex: index })
-}))
+            setActiveTab: (index) => set({ activeTabIndex: index }),
+
+            // Console 折叠状态
+            consoleCollapsed: false,
+            setConsoleCollapsed: (collapsed) => set({ consoleCollapsed: collapsed })
+        }),
+        {
+            name: 'signalflux-console',
+            storage: createJSONStorage(() => sessionStorage),
+            partialize: (state) => ({
+                // Only persist data, not volatile status
+                steps: state.steps,
+                signals: state.signals,
+                charts: state.charts,
+                graph: state.graph,
+                runId: state.runId,
+                query: state.query,
+                consoleCollapsed: state.consoleCollapsed
+                // Intentionally NOT persisting: status, phase, progress
+                // These should reset to 'idle' on page refresh to sync with backend
+            })
+        }
+    )
+)
+
