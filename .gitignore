@@ -19,3 +19,7 @@ logs/
 
 # Mac
 .DS_Store
+
+# agent
+.agent
+.shared

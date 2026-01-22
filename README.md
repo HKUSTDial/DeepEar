@@ -56,10 +56,12 @@ AlphaEar is designed for financial analysts, quantitative researchers, and indiv
 ## ✨ Features
 
 - **Multi-Agent Collaboration**: Specialized agents for Trend Spotting, Financial Analysis, and Report Writing working in concert.
+- **Interactive Fintech Dashboard**: A modern React-based UI for real-time monitoring of agent workflows, logs, and structured results.
+- **Logic Evolution Tracking**: Active tracking of how investment theses evolve as new market news and price data arrive.
+- **Signal-Based Comparison**: Deep side-by-side analysis of signal changes, drift in sentiment, and logic updates between different runs.
 - **15+ Data Sources**: Comprehensive coverage including Weibo, Cailian Press, Wall Street News, and more via `NewsToolkit`.
 - **News-Aware Time-Series Model**: Custom **Kronos** integration with a news-projection layer for predicting price shocks.
 - **Visualized Reports & Logic Graphs**: High-fidelity HTML reports featuring interactive **Draw.io** diagrams for logic transmission.
-- **Dual-Model Architecture**: Optimized routing between "Reasoning Models" (e.g., GPT-5.2) for logic and "Tool Models" (e.g., Ollama).
 - **Hybrid RAG Engine**: Combines BM25 (keyword) and Vector Search (semantic) for precise information retrieval.
 
 ---
@@ -98,14 +100,28 @@ AlphaEar is designed for financial analysts, quantitative researchers, and indiv
    - `TOOL_MODEL_ID`: Model for tool usage (e.g., `qwen2.5`).
    - `JINA_API_KEY`: (Optional) Unified Jina API key for both web search (s.jina.ai) and content extraction (r.jina.ai).
 
-### Run
+### Running AlphaEar
 
-Execute the main workflow:
+#### Option 1: Start the Dashboard (Recommended)
+Launch the modern web interface to monitor and control the agents visually:
+```bash
+# Start the backend server
+uv run python -m dashboard.server
+
+# Start the frontend (in a separate terminal)
+cd dashboard/frontend
+npm install  # (First time only)
+npm run dev
+```
+Open `http://localhost:5173` in your browser.
+
+#### Option 2: Command Line Interface
+Execute the main workflow directly:
 ```bash
 uv run src/main_flow.py
 ```
 
-#### Command Line Arguments
+#### CLI Command Line Arguments
 | Argument | Description | Default |
 | :--- | :--- | :--- |
 | `--query` | User query/intent (e.g., "A-share tech sector") | `None` |
@@ -222,18 +238,22 @@ Derived from our internal plans:
 
 ### Phase 1: Enhanced Visualization & Signals
 - [x] **Semantic Visualization**: Relation topology graphs and ISQ Radar charts.
-- [x] **Interactive Diagrams**: Logic transmission chains using **Draw.io** (MxGraph) for editable, professional layouts.
-- [x] **Signal Pipeline**: Quantitative scoring tunnel based on ISQ templates.
+- [x] **Interactive Dashboard**: Real-time React-based fintech UI for run monitoring.
+- [x] **Interactive Diagrams**: Logic transmission chains via **Draw.io**.
 
 ### Phase 2: Advanced Inference
 - [x] **Time-Series Integration**: Integrated **Kronos** for predictive K-line modeling.
-- [x] **News-Aware Projection**: Trained linear layer for injecting semantic news impact into the model's latent space.
-- [x] **AI Forecasting**: Multi-agent adjustment of historical predictions based on news context.
+- [x] **News-Aware Projection**: Latent space news impact injection into foundation models.
+- [x] **AI Forecasting**: Multi-agent market impact refinement.
 
-### Phase 3: Infrastructure & Expansion
+### Phase 3: Infrastructure & Automation
 - [x] **Hybrid Search**: Reciprocal Rank Fusion of BM25 and Vector Search.
+- [x] **Logic Evolution Tracking**: Active monitoring of investment thesis changes over time.
+- [x] **Signal-Based Comparison**: Visual diffing of signal sentiment and reasoning across runs.
+
+### Phase 4: Expansion
 - [ ] **US Market Support**: Add Alpha Vantage/Yahoo Finance adaptors.
-- [ ] **LangGraph Migration**: Explore graph-based state management for complex loops.
+- [ ] **LangGraph Migration**: Graph-based state management for complex loops.
 - [ ] **Polymarket Integration**: Add prediction market data as a signal source.
 
 
