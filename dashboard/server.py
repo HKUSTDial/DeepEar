@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -234,6 +234,17 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
 
         if is_user_task_running:
             # Sync user ID to run state if needed
+            # Critical Fix: Ensure in-memory state matches DB state on reconnection
+            # If DB says running but memory doesn't match, we might have lost context or it's a zombie.
+            # But if the server hasn't restarted, memory *should* be there.
+            # We force re-attach context just in case.
+            if run_state.current_run_id != running_task.run_id:
+                logger.warning(f"🔄 Re-syncing run_state from DB: {running_task.run_id}")
+                run_state.current_run_id = running_task.run_id
+                run_state.current_user_id = user_id
+                run_state.status = running_task.status
+                # Attempt to recover last progress/phase if possible (or keep default)
+
             if run_state.current_run_id == running_task.run_id:
                 run_state.current_user_id = user_id
 
@@ -249,7 +260,7 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
                     "status": running_task.status,
                     "query": running_task.query,
                     "steps": [s.model_dump() for s in steps],
-                    "signals": run_state.signals,
+                    "signals": run_state.signals,  # Note: If server restarted, this is empty. Ideally load from DB json.
                     "charts": valid_charts,
                     "graph": run_state.transmission_graph
                 }
@@ -544,7 +555,8 @@ async def suggest_queries(request: dict):
         # Get model config from environment
         provider = os.getenv("LLM_PROVIDER", "deepseek")
         model_id = os.getenv("LLM_MODEL", "deepseek-chat")
-        llm = get_model(provider, model_id)
+        host = os.getenv('LLM_HOST', None)
+        llm = get_model(provider, model_id, host=host)
         agent = Agent(model=llm, markdown=False)
         
         prompt = f"""你是一位金融分析专家。基于以下新闻标题，生成 10 个不同角度的分析查询（Query）。
@@ -672,6 +684,23 @@ async def get_run_data(run_id: str, current_user: dict = Depends(get_current_use
             except Exception as e:
                 logger.error(f"Failed to read report file {report_file}: {e}")
             
+    if report_content:
+        # Dynamic fix for Dashboard: Convert relative chart paths to Dynamic API paths
+        # Filesystem: src="charts/..." (good for local file opening)
+        # Dashboard: src="/api/charts/..." (loads with Dark Theme adaptation)
+        # Add timestamp to bust cache
+        import time
+        ts = int(time.time())
+        report_content = report_content.replace('src="charts/', f'src="/api/charts/')
+        # Append timestamp param. Since file usually ends with .html", we can replace .html" with .html?t=ts"
+        report_content = report_content.replace('.html"', f'.html?t={ts}"')
+
+        # Dynamic fix for Forecast Logic Box styles
+        # Original: background:#f9f9f9; color:#555
+        # Dashboard Dark: background:#1e293b; color:#cbd5e1
+        report_content = report_content.replace('background:#f9f9f9', 'background:#1e293b')
+        report_content = report_content.replace('color:#555', 'color:#cbd5e1')
+
     result["report_content"] = report_content
     result["report_path"] = report_path
     
@@ -765,6 +794,75 @@ async def update_run_endpoint(run_id: str, request: RunRequest, current_user: di
     
     asyncio.create_task(execute_update_workflow(run_id, request.query, new_run_id))
     return {"message": "Update started", "base_run_id": run_id, "run_id": new_run_id}
+
+
+@app.get("/api/charts/{filename:path}")
+async def get_chart_dynamic(filename: str):
+    """
+    动态渲染图表接口:
+    - 读取原始 HTML 图表文件
+    - 强制应用 'dark' 主题和 'transparent' 背景
+    - 这是为了适配 Dashboard 的深色模式，同时不修改原始文件（保持本地查看时的 Light 模式）
+    """
+    file_path = Path("reports/charts") / filename
+    if not file_path.exists():
+        # Try without strict path checking just in case
+        raise HTTPException(404, "Chart not found")
+        
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        
+        # 1. 注入背景色透明 (Inject into option object)
+        # 查找 option 定义，通常 pyecharts 生成: var option_xxx = {
+        # 我们替换为 { backgroundColor: 'transparent',
+        # 1. 注入背景色 (Inject into option object)
+        # 使用 Dashboard 深色背景 #0f172a (Slate-900)
+        TARGET_BG = "#0f172a"
+        
+        if "option_" in content and " = {" in content:
+             import re
+             content = re.sub(r"(var option_[a-zA-Z0-9_]+ = \{)", f"\\1 \\n    backgroundColor: '{TARGET_BG}',", content)
+        
+        # 2. 切换 ECharts 主题
+        content = content.replace(", 'white',", ", 'dark',")
+        content = content.replace(", 'light',", ", 'dark',")
+        
+        # ... logic ...
+        if ", 'dark'," not in content:
+             content = re.sub(r",\s*'light',\s*", ", 'dark', ", content)
+             content = re.sub(r",\s*'white',\s*", ", 'dark', ", content)
+        
+        # 3. 额外优化
+        content = content.replace('"backgroundColor": "white"', f'"backgroundColor": "{TARGET_BG}"')
+        content = content.replace('"backgroundColor": "transparent"', f'"backgroundColor": "{TARGET_BG}"')
+        
+        # 4. 关键：强制 HTML body 背景
+        style_inject = f"""
+        <style>
+            html, body {{ background: {TARGET_BG} !important; background-color: {TARGET_BG} !important; margin: 0; padding: 0; }}
+            .chart-container {{ background: {TARGET_BG} !important; background-color: {TARGET_BG} !important; }}
+        </style>
+        """
+        if "</head>" in content:
+            content = content.replace("</head>", f"{style_inject}\n</head>")
+        else:
+            content = style_inject + content
+            
+        # 5. JS 强制清除
+        js_inject = f"""
+        <script>
+            try {{
+                document.body.style.backgroundColor = "{TARGET_BG}";
+                document.documentElement.style.backgroundColor = "{TARGET_BG}";
+            }} catch(e) {{}}
+        </script>
+        """
+        content += js_inject
+
+        return HTMLResponse(content=content)
+    except Exception as e:
+        logger.error(f"Failed to process chart {filename}: {e}")
+        return FileResponse(file_path)
 
 async def execute_update_workflow(base_run_id: str, user_query: Optional[str], new_run_id: str):
     """Execute update logic"""
