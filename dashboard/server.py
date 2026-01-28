@@ -605,7 +605,10 @@ async def suggest_queries(request: dict):
         provider = os.getenv("LLM_PROVIDER", "deepseek")
         model_id = os.getenv("LLM_MODEL", "deepseek-chat")
         host = os.getenv('LLM_HOST', None)
-        llm = get_model(provider, model_id, host=host)
+        if host:
+            llm = get_model(provider, model_id, host=host)
+        else:
+            llm = get_model(provider, model_id)
         agent = Agent(model=llm, markdown=False)
         
         prompt = f"""你是一位金融分析专家。基于以下新闻标题，生成 10 个不同角度的分析查询（Query）。

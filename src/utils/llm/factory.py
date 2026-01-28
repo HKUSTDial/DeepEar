@@ -28,7 +28,6 @@ def get_model(model_provider: str, model_id: str, **kwargs):
         
         return DeepSeek(
             id=model_id,
-            base_url="https://api.deepseek.com",
             api_key=api_key,
             **kwargs
         )
