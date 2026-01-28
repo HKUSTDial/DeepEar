@@ -129,7 +129,7 @@ class WorkflowRunner:
         
         thread = threading.Thread(
             target=self._run_workflow_wrapper, # Use wrapper to set context
-            args=(run_id, query, sources or ["financial"], wide, depth, user_id),
+            args=(run_id, query, sources or ["financial"], wide, depth, run_state, user_id),
             daemon=True
         )
         with self._lock:
@@ -154,7 +154,7 @@ class WorkflowRunner:
 
         thread = threading.Thread(
             target=self._run_update_wrapper,
-            args=(new_run_id, base_run_id, user_query, user_id),
+            args=(new_run_id, base_run_id, run_state, user_query, user_id),
             daemon=True
         )
         with self._lock:
@@ -504,15 +504,12 @@ class WorkflowRunner:
     
     def _run_update(self, run_id: str, base_run_id: str, *args):
         """执行更新工作流 (Thread)"""
-        # args: user_query, user_id
-        # We need to map args correctly or change signature to named args in wrapper
-        # Wrapper calls: self._run_update(run_id, *args)
-        # update_run_async args: (new_run_id, base_run_id, user_query, user_id)
-        # So in wrapper args is (base_run_id, user_query, user_id)
-        
+        # args: run_state, user_query, user_id (after update to update_run_async)
         # Unpack
-        user_query = args[0] if len(args) > 0 else None
-        user_id = args[1] if len(args) > 1 else None
+        run_state = args[0] if len(args) > 0 else None
+        user_query = args[1] if len(args) > 1 else None
+        user_id = args[2] if len(args) > 2 else None
+        new_run_id = run_id  # This is the new run ID passed from wrapper
 
         cb = dashboard_callback
         try:
