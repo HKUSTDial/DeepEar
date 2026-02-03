@@ -194,12 +194,23 @@ export function ReportRenderer({ data, query }: Props) {
                                 />
                             </div>
 
-                            <button
-                                onClick={verifyAndPrint}
-                                style={{ width: '100%', padding: '10px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 500 }}
-                            >
-                                确认并打印
-                            </button>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <button
+                                    onClick={() => {
+                                        const url = `${window.location.origin}/api/run/${data.run_id}/export?view=true`;
+                                        window.prompt('报告预览/分享链接：', url);
+                                    }}
+                                    style={{ flex: 1, padding: '10px', background: '#f8fafc', color: '#1e293b', border: '1px solid #e2e8f0', borderRadius: 6, cursor: 'pointer', fontWeight: 500 }}
+                                >
+                                    复制链接
+                                </button>
+                                <button
+                                    onClick={verifyAndPrint}
+                                    style={{ flex: 2, padding: '10px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 500 }}
+                                >
+                                    确认并打印
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}

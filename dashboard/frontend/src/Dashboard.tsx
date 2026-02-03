@@ -566,10 +566,16 @@ export function Dashboard() {
                                                 className="btn-secondary"
                                                 style={{ padding: '6px 14px', height: '32px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
                                                 onClick={() => {
-                                                    const url = `${window.location.protocol}//${window.location.host}/api/run/${currentRunData.run_id}/export?view=true`;
-                                                    navigator.clipboard.writeText(url).then(() => alert('报告预览/分享链接已复制到剪贴板'));
+                                                    const url = `${window.location.origin}/api/run/${currentRunData.run_id}/export?view=true`;
+                                                    if (navigator.clipboard) {
+                                                        navigator.clipboard.writeText(url)
+                                                            .then(() => alert('报告预览/分享链接已复制到剪贴板'))
+                                                            .catch(() => window.prompt('由于浏览器安全限制，请手动复制分享链接：', url));
+                                                    } else {
+                                                        window.prompt('由于浏览器安全限制，请手动复制分享链接：', url);
+                                                    }
                                                 }}
-                                                title="复制下载链接"
+                                                title="复制分享链接"
                                             >
                                                 <Share2 size={14} /> 分享
                                             </button>
