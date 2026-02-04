@@ -603,7 +603,7 @@ class DatabaseManager:
         code_count = cursor.fetchone()[0]
         
         if user_count == 0 and code_count == 0:
-            initial_code = "ALPHA-EAR-ADMIN"
+            initial_code = "DEEP-EAR-ADMIN"
             cursor.execute("INSERT OR IGNORE INTO invitation_codes (code, created_at) VALUES (?, ?)", 
                           (initial_code, datetime.now().isoformat()))
             self.conn.commit()

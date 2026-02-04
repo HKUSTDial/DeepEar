@@ -21,7 +21,7 @@ def generate_code(length=12):
     return ''.join(random.choices(chars, k=length))
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate invitation codes for AlphaEar")
+    parser = argparse.ArgumentParser(description="Generate invitation codes for DeepEar")
     parser.add_argument("-n", "--number", type=int, default=1, help="Number of codes to generate")
     parser.add_argument("-l", "--length", type=int, default=12, help="Length of each code")
     parser.add_argument("--prefix", type=str, default="", help="Optional prefix for the code")
@@ -30,7 +30,7 @@ def main():
     
     db = DatabaseManager()
     
-    print(f"\nGeneratin {args.number} invitation codes...\n")
+    print(f"\nGenerating {args.number} invitation codes...\n")
     print("-" * 40)
     print(f"{'Code':<25} | {'Status':<10}")
     print("-" * 40)

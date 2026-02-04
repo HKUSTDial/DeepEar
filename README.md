@@ -115,6 +115,8 @@ uv run python -m dashboard.server
 ```
 Open `http://localhost:8765` in your browser.
 
+> **Note**: For first-time access, you need to register an account. Use the default invitation code `DEEP-EAR-ADMIN` to get started. You can generate more invitation codes using `uv run scripts/generate_invitation.py`.
+
 #### Option 2: Command Line Interface
 Execute the main workflow directly:
 ```bash
@@ -128,7 +130,7 @@ uv run src/main_flow.py
 | `--sources` | News sources: `all`, `financial`, `social`, `tech`, or a comma-separated list | `all` |
 | `--wide` | Number of news items to fetch per source | `10` |
 | `--depth` | Report depth: `auto` (LLM decided) or an integer limit | `auto` |
-| `--template` | ISQ scoring template ID | `default_isq_v1` |
+| `--template` | ISQ (Investment Signal Quality) scoring template ID | `default_isq_v1` |
 | `--concurrency` | Concurrency level for signal analysis (max workers) | `1` |
 | `--resume` | Resume from the latest checkpoint | `False` |
 | `--resume-from` | Checkpoint to resume from: `report` (reuse MD), `analysis` (rerender) | `report` |

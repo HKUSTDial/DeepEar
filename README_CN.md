@@ -116,6 +116,8 @@ uv run python -m dashboard.server
 ```
 在浏览器中打开 `http://localhost:8765`。
 
+> **提示**：首次访问需要注册账号。可以使用默认邀请码 `DEEP-EAR-ADMIN` 进行注册。如需生成更多邀请码，请运行 `uv run scripts/generate_invitation.py`。
+
 #### 方式 2：命令行界面 (CLI)
 直接执行主工作流：
 ```bash
@@ -129,7 +131,7 @@ uv run src/main_flow.py
 | `--sources` | 新闻来源: `all`, `financial`, `social`, `tech`, 或以逗号分隔的列表 | `all` |
 | `--wide` | 每个来源抓取的新闻条数 | `10` |
 | `--depth` | 报告深度: `auto` (由 LLM 判断) 或整数限制 | `auto` |
-| `--template` | ISQ 评分模板 ID | `default_isq_v1` |
+| `--template` | ISQ (Investment Signal Quality) 评分模板 ID | `default_isq_v1` |
 | `--concurrency` | 信号分析的并发线程数 (最大工作线程) | `1` |
 | `--resume` | 从最近的断点恢复运行 | `False` |
 | `--resume-from` | 恢复位置: `report` (仅重绘 MD), `analysis` (重新生成信号分析) | `report` |
