@@ -24,9 +24,12 @@
   <!-- 预留演示内容位置 -->
   <br/><br/>
   <!-- <img src="assets/demo.gif" alt="AlphaEar Demo" width="800"> -->
-  <!-- 视频演示 -->
+  <!-- 视频演示：封面图跳转模式 (兼容 GitHub 网页端) -->
   <br/>
-  <video src="https://github.com/RKiding/RKiding.github.io/raw/main/signalflux/deep%20ear%20demo.mp4" width="100%" controls autoplay loop muted></video>
+  <a href="https://rkiding.github.io/signalflux/deep%20ear%20demo.mp4" target="_blank">
+    <img src="assets/dashboard_screenshot.png" alt="Watch Demo" width="100%" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+  </a>
+  <p><i>▶️ 点击观看 DeepEar 工作流演示视频</i></p>
   <br/><br/>
 
   <!-- 缩小的报告预览 -->
