@@ -19,7 +19,7 @@ const formatTime = (value?: string) => {
 }
 
 export const LiteDashboard = () => {
-  const UPDATE_INTERVAL_HOURS = 4
+  const UPDATE_INTERVAL_HOURS = 1
   const navigate = useNavigate()
   const [payload, setPayload] = useState<LitePayload | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -56,7 +56,7 @@ export const LiteDashboard = () => {
         <div className="lite-meta">
           <div>更新时间：{formatTime(payload?.generated_at)}</div>
           <div>信号数：{payload?.count ?? signals.length}</div>
-          <div>建议更新频率：{UPDATE_INTERVAL_HOURS} 小时</div>
+          <div>目前更新频率：{UPDATE_INTERVAL_HOURS} 小时/次</div>
         </div>
       </header>
 
