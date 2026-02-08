@@ -4,6 +4,9 @@
   <p>
     <b>English</b> | <a href="./README_CN.md">简体中文</a>
   </p>
+  <p>
+    🚀 <b>Live Demo (Free Lite Version): <a href="https://deepear.vercel.app/">https://deepear.vercel.app/</a></b>
+  </p>
 </div>
 
 <div align="center">

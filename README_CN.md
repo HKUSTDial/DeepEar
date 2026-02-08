@@ -4,6 +4,9 @@
   <p>
     <a href="./README.md">English</a> | <b>简体中文</b>
   </p>
+  <p>
+    🚀 <b>可以直接在线查看 Free Lite 版本：<a href="https://deepear.vercel.app/">https://deepear.vercel.app/</a></b>
+  </p>
 </div>
 
 <div align="center">
