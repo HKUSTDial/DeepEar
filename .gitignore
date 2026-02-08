@@ -13,6 +13,7 @@ wheels/
 
 # data and output
 data/
+!data/lite_stock.db
 src/tests
 reports/
 logs/

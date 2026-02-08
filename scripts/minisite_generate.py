@@ -1,23 +1,35 @@
 import argparse
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 import sys
 import shutil
 from typing import List, Optional, Dict, Any, Union
+from zoneinfo import ZoneInfo
 
 
 def resolve_project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def load_signals(limit: int):
+def get_now() -> datetime:
+    tz_name = os.getenv("TZ") or os.getenv("APP_TZ")
+    if tz_name:
+        try:
+            return datetime.now(ZoneInfo(tz_name))
+        except Exception:
+            pass
+    return datetime.now()
+
+
+def load_signals(limit: int, db_path: str):
     project_root = resolve_project_root()
     sys.path.insert(0, str(project_root))
     sys.path.insert(0, str(project_root / "src"))
     from utils.database_manager import DatabaseManager  # pylint: disable=import-error
 
-    db = DatabaseManager()
+    db = DatabaseManager(db_path)
     try:
         signals = db.get_recent_signals(limit=limit)
     finally:
@@ -46,12 +58,12 @@ def load_signals(limit: int):
     return items
 
 
-def load_latest_run_data(max_runs: int = 10):
+def load_latest_run_data(max_runs: int = 10, db_path: str = "data/signal_flux.db"):
     project_root = resolve_project_root()
     sys.path.insert(0, str(project_root))
     from dashboard.db import DashboardDB  # pylint: disable=import-error
 
-    db = DashboardDB()
+    db = DashboardDB(db_path=db_path)
     try:
         history = db.get_history(limit=max_runs)
         for run in history:
@@ -88,6 +100,7 @@ def run_lite_analysis(
     wide: int,
     depth: Union[int, str],
     max_charts: int = 6,
+    db_path: str = "data/signal_flux.db",
 ) -> Dict[str, Any]:
     project_root = resolve_project_root()
     sys.path.insert(0, str(project_root))
@@ -101,7 +114,7 @@ def run_lite_analysis(
     from dashboard.integration import WorkflowRunner  # pylint: disable=import-error
     from main_flow import SignalFluxWorkflow  # pylint: disable=import-error
 
-    db = DatabaseManager()
+    db = DatabaseManager(db_path)
     try:
         reasoning_model = router.get_reasoning_model()
         tool_model = router.get_tool_model()
@@ -110,7 +123,7 @@ def run_lite_analysis(
         fin_agent = FinAgent(db, reasoning_model, tool_model=tool_model, isq_template_id="default_isq_v1")
         intent_agent = IntentAgent(reasoning_model)
         search_tools = SearchTools(db)
-        stock_tools = StockTools(db)
+        stock_tools = StockTools(db, auto_update=False)
         formatter = WorkflowRunner()
 
         resolved_sources = _resolve_sources(sources)
@@ -144,7 +157,7 @@ def run_lite_analysis(
                             "url": r.get("url"),
                             "source": r.get("source", "Search"),
                             "content": r.get("content"),
-                            "publish_time": r.get("publish_time") or datetime.now().isoformat(),
+                            "publish_time": r.get("publish_time") or get_now().isoformat(),
                             "sentiment_score": r.get("sentiment_score", 0),
                             "id": r.get("id") or f"search_{hash(r.get('url'))}",
                         }
@@ -243,7 +256,7 @@ def run_lite_analysis(
 def write_latest_json(output_path: Path, signals):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": get_now().isoformat(),
         "count": len(signals),
         "signals": signals,
     }
@@ -280,6 +293,12 @@ def parse_args():
     parser.add_argument("--max-charts", type=int, default=6, help="Max charts to generate")
     parser.add_argument("--limit", type=int, default=50, help="Max signals to export")
     parser.add_argument(
+        "--db-path",
+        type=str,
+        default=os.getenv("STOCK_DB_PATH") or "data/signal_flux.db",
+        help="SQLite DB path containing cached stock list",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default=None,
@@ -311,11 +330,12 @@ def main():
             wide=args.wide,
             depth=depth,
             max_charts=args.max_charts,
+            db_path=args.db_path,
         )
 
         payload = {
-            "generated_at": datetime.now().isoformat(),
-            "run_id": f"lite_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "generated_at": get_now().isoformat(),
+            "run_id": f"lite_{get_now().strftime('%Y%m%d_%H%M%S')}",
             "count": len(result.get("signals", [])),
             "signals": result.get("signals", []),
             "charts": result.get("charts", {}),
@@ -324,11 +344,11 @@ def main():
         print(f"✅ LLM analysis exported -> {output_path}")
         return
 
-    run_id, run_data = load_latest_run_data()
+    run_id, run_data = load_latest_run_data(db_path=args.db_path)
     if run_data:
         signals = run_data.get("signals", [])
         payload = {
-            "generated_at": datetime.now().isoformat(),
+            "generated_at": get_now().isoformat(),
             "run_id": run_id,
             "count": len(signals),
             "signals": signals,
@@ -338,7 +358,7 @@ def main():
         print(f"✅ Exported run {run_id} with {len(signals)} signals -> {output_path}")
         return
 
-    signals = load_signals(limit=args.limit)
+    signals = load_signals(limit=args.limit, db_path=args.db_path)
     write_latest_json(output_path, signals)
     print(f"✅ Exported {len(signals)} signals (fallback) -> {output_path}")
 
