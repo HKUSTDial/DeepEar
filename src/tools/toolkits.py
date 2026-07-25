@@ -12,6 +12,7 @@ from utils.news_tools import NewsNowTools, PolymarketTools
 from utils.stock_tools import StockTools
 from utils.search_tools import SearchTools
 from utils.sentiment_tools import SentimentTools
+from utils.youcom_search import YoucomResearchEngine
 
 
 class NewsToolkit(Toolkit):
@@ -395,16 +396,17 @@ class SearchToolkit(Toolkit):
     def web_search(self, query: str, engine: str = None, max_results: int = 5) -> str:
         """
         使用指定搜索引擎执行网络搜索。
-        
+
         Args:
             query: 搜索关键词，如 "英伟达财报" 或 "光伏行业政策"。
-            engine: 搜索引擎选择。可选值: 
+            engine: 搜索引擎选择。可选值:
+                    "youcom" (You.com Search，需配置 YOUCOM_API_KEY),
                     "jina" (Jina Search，需配置 JINA_API_KEY，LLM友好输出),
-                    "ddg" (DuckDuckGo，推荐英文/国际搜索), 
+                    "ddg" (DuckDuckGo，推荐英文/国际搜索),
                     "baidu" (百度，推荐中文/国内搜索)。
                     默认: 若配置了 JINA_API_KEY 则使用 "jina"，否则 "ddg"。
             max_results: 返回结果数量。默认 5。
-        
+
         Returns:
             搜索结果的文本描述。
         """
@@ -422,6 +424,73 @@ class SearchToolkit(Toolkit):
             聚合后的搜索结果。
         """
         return self._search_tools.aggregate_search(query, max_results=max_results)
+
+
+class YoucomResearchToolkit(Toolkit):
+    """
+    You.com 深度研究工具包 - 包装 YoucomResearchEngine 为 Agno Toolkit
+
+    提供深度研究功能，返回带引用的高质量综述答案。
+    适用于复杂金融问题需要综合多方信息的深度分析场景。
+    """
+
+    def __init__(self, **kwargs):
+        self._research_engine = YoucomResearchEngine()
+
+        tools = [
+            self.deep_research,
+        ]
+        super().__init__(name="youcom_research_toolkit", tools=tools, **kwargs)
+
+    def deep_research(self, query: str, research_effort: str = "standard") -> str:
+        """
+        使用 You.com Research API 进行深度研究，返回带引用的高质量综述答案。
+
+        适用于复杂金融问题需要综合多方信息来源的场景，
+        如行业趋势分析、政策影响评估、竞争格局研究等。
+        对于简单的事实查询，建议使用 web_search 工具。
+
+        Args:
+            query: 研究问题，如 "光伏行业2024年供需格局变化及投资机会" 或 " GLP-1 药物对胰岛素替代市场的长期影响"。
+            research_effort: 研究深度，可选值:
+                    "lite" (快速概览),
+                    "standard" (标准深度，默认),
+                    "deep" (深度分析),
+                    "exhaustive" (穷尽式研究)。
+                    默认: "standard"。
+
+        Returns:
+            深度研究报告，包含综述内容和引用来源列表。
+        """
+        logger.info(f"🔧 [TOOL CALLED] deep_research(query={query[:50]}..., effort={research_effort})")
+
+        result = self._research_engine.research(query, research_effort=research_effort)
+
+        content = result.get("content", "")
+        sources = result.get("sources", [])
+
+        if not content:
+            return "⚠️ You.com Research 返回了空结果，可能是 API Key 未配置或查询失败。"
+
+        output = f"## You.com 深度研究报告\n\n"
+        output += f"**研究问题:** {query}\n"
+        output += f"**研究深度:** {research_effort}\n\n"
+        output += f"### 综述答案\n\n{content}\n\n"
+        output += f"### 引用来源 (共 {len(sources)} 条)\n\n"
+        for i, source in enumerate(sources, 1):
+            title = source.get("title", "未命名来源")
+            url = source.get("url", "")
+            snippet = source.get("snippet", "")
+            output += f"{i}. **{title}**"
+            if url:
+                output += f" — {url}"
+            output += f"\n"
+            if snippet:
+                output += f"   > {snippet[:200]}{'...' if len(snippet) > 200 else ''}\n"
+            output += "\n"
+
+        logger.info(f"✅ [TOOL SUCCESS] You.com Research returned {len(sources)} sources")
+        return output
 
 
 class ContextSearchToolkit(Toolkit):

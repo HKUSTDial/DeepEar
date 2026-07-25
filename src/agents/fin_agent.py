@@ -7,7 +7,7 @@ from agno.models.base import Model
 from loguru import logger
 
 from utils.database_manager import DatabaseManager
-from tools.toolkits import StockToolkit, SearchToolkit, NewsToolkit
+from tools.toolkits import StockToolkit, SearchToolkit, NewsToolkit, YoucomResearchToolkit
 from prompts.fin_agent import (
     get_fin_researcher_instructions, 
     get_fin_analyst_instructions,
@@ -35,6 +35,7 @@ class FinAgent:
         self.stock_toolkit = StockToolkit(db)
         self.search_toolkit = SearchToolkit(db)
         self.news_toolkit = NewsToolkit(db)
+        self.youcom_research_toolkit = YoucomResearchToolkit()
         
         # 1. 研究员 Agent (负责使用工具搜集信息)
         self.researcher = Agent(
@@ -44,6 +45,7 @@ class FinAgent:
                 self.stock_toolkit.get_stock_price,
                 self.search_toolkit.web_search,
                 self.news_toolkit.fetch_news_content,
+                self.youcom_research_toolkit.deep_research,
             ],
             instructions=[get_fin_researcher_instructions()],
             markdown=False,
