@@ -108,7 +108,60 @@ def get_model(model_provider: str, model_id: str, **kwargs):
             extra_body={"enable_thinking": False}, # TODO: one more setting for thinking
             **kwargs
         )
-    
+
+    elif model_provider == 'minimax':
+        # MiniMax exposes an OpenAI-compatible endpoint. Two regions are served
+        # from different hosts: the global endpoint (api.minimax.io) and the
+        # mainland China endpoint (api.minimaxi.com). Select one via
+        # MINIMAX_REGION ("global_en" | "cn_zh"), or override the URL directly
+        # with MINIMAX_BASE_URL.
+        api_key = os.getenv("MINIMAX_API_KEY")
+        if not api_key:
+            print('Warning: MINIMAX_API_KEY not set.')
+
+        region_base_urls = {
+            "global_en": "https://api.minimax.io/v1",
+            "cn_zh": "https://api.minimaxi.com/v1",
+        }
+        region = os.getenv("MINIMAX_REGION", "global_en")
+        base_url = os.getenv("MINIMAX_BASE_URL") or region_base_urls.get(
+            region, region_base_urls["global_en"]
+        )
+
+        # Thinking (reasoning) support differs per model: MiniMax-M3 can switch
+        # between "adaptive" and "disabled", while MiniMax-M2.7 always reasons
+        # and cannot be toggled off. MINIMAX_THINKING may override the mode for
+        # models that allow it; unsupported values fall back to the default.
+        thinking_modes = {
+            "MiniMax-M3": ["adaptive", "disabled"],
+            "MiniMax-M2.7": ["always_on"],
+        }
+        supported_modes = thinking_modes.get(model_id, ["adaptive", "disabled"])
+        thinking_mode = os.getenv("MINIMAX_THINKING", supported_modes[0])
+        if thinking_mode not in supported_modes:
+            thinking_mode = supported_modes[0]
+
+        # MiniMax uses the OpenAI-compatible standard role names.
+        default_role_map = {
+            "system": "system",
+            "user": "user",
+            "assistant": "assistant",
+            "tool": "tool",
+            "model": "assistant",
+        }
+
+        # Allow callers to override role_map via kwargs, otherwise use default
+        role_map = kwargs.pop("role_map", default_role_map)
+
+        return OpenAIChat(
+            id=model_id,
+            api_key=api_key,
+            base_url=base_url,
+            role_map=role_map,
+            extra_body={"enable_thinking": thinking_mode != "disabled"},
+            **kwargs
+        )
+
     else:
         raise ValueError(f"Unknown model provider: {model_provider}")
 
