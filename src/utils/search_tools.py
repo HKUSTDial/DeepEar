@@ -15,6 +15,7 @@ from utils.database_manager import DatabaseManager
 from utils.content_extractor import ContentExtractor
 from utils.llm.factory import get_model
 from utils.hybrid_search import LocalNewsSearch
+from utils.youcom_search import YoucomSearchEngine
 
 # 默认搜索缓存 TTL（秒），可通过环境变量覆盖
 DEFAULT_SEARCH_TTL = int(os.getenv("SEARCH_CACHE_TTL", "3600"))  # 默认 1 小时
@@ -162,18 +163,27 @@ class SearchTools:
         # 检查 Jina API Key 是否配置
         jina_api_key = os.getenv("JINA_API_KEY", "").strip()
         self._jina_enabled = bool(jina_api_key)
-        
+
+        # 检查 You.com API Key 是否配置
+        youcom_api_key = os.getenv("YOUCOM_API_KEY", "").strip()
+        self._youcom_enabled = bool(youcom_api_key)
+
         self._engines = {
             "ddg": DuckDuckGoTools(),
             "baidu": BaiduSearchTools(),
             "local": LocalNewsSearch(db)
         }
-        
+
         # 如果配置了 Jina API Key，添加 Jina 引擎
         if self._jina_enabled:
             self._engines["jina"] = JinaSearchEngine()
             logger.info("🚀 Jina Search engine enabled (JINA_API_KEY configured)")
-        
+
+        # 如果配置了 You.com API Key，添加 You.com 引擎
+        if self._youcom_enabled:
+            self._engines["youcom"] = YoucomSearchEngine()
+            logger.info("🚀 You.com Search engine enabled (YOUCOM_API_KEY configured)")
+
         # 确定默认搜索引擎
         self._default_engine = "jina" if self._jina_enabled else "ddg"
 
@@ -245,6 +255,15 @@ class SearchTools:
                         "href": r.get("url", "local"),
                         "body": r.get("content", "")
                     })
+            elif engine == "youcom":
+                youcom_results = tool.search(query, max_results=max_results)
+                results = []
+                for r in youcom_results:
+                    results.append({
+                        "title": r.get("title", ""),
+                        "href": r.get("url", ""),
+                        "body": r.get("content", "")
+                    })
             else:
                 results = "Search not implemented for this engine."
             
@@ -255,7 +274,13 @@ class SearchTools:
             
         except Exception as e:
             # 搜索失败时的降级策略
-            if engine == "jina":
+            if engine == "youcom":
+                logger.warning(f"⚠️ You.com search failed, falling back to jina: {query} ({e})")
+                try:
+                    return self.search(query, engine="jina", max_results=max_results, ttl=ttl)
+                except Exception as e2:
+                    logger.error(f"❌ Jina fallback also failed for {query}: {e2}")
+            elif engine == "jina":
                 logger.warning(f"⚠️ Jina search failed, falling back to ddg: {query} ({e})")
                 try:
                     return self.search(query, engine="ddg", max_results=max_results, ttl=ttl)
@@ -408,6 +433,17 @@ class SearchTools:
                         "source": f"Local ({r.get('source', 'db')})",
                         "publish_time": r.get("publish_time")
                     })
+            elif engine == "youcom":
+                youcom_results = tool.search(query, max_results=max_results)
+                for r in youcom_results:
+                    results.append({
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "href": r.get("url", ""),
+                        "body": r.get("content", ""),
+                        "content": r.get("content", ""),
+                        "source": "You.com Search"
+                    })
             
             # 处理字符串类型的 JSON 返回 (Baidu 常返 JSON 字符串)
             if isinstance(results, str) and engine not in ["local", "jina"]:
@@ -444,8 +480,8 @@ class SearchTools:
                  normalized_results.append({"title": query, "url": "", "content": results, "source": engine})
 
             # 3. 抓取正文 & 计算情绪 (Enrichment)
-            # 注意：如果使用 Jina Search，内容已经是 LLM 友好格式，可选择跳过 enrichment
-            skip_content_enrichment = (engine == "jina")
+            # 注意：如果使用 Jina Search 或 You.com Search，内容已经是 LLM 友好格式，可选择跳过 enrichment
+            skip_content_enrichment = (engine in ("jina", "youcom"))
             
             if enrich and normalized_results:
                 logger.info(f"🕸️ Enriching {len(normalized_results)} search results with Jina & Sentiment...")
@@ -503,7 +539,13 @@ class SearchTools:
             
         except Exception as e:
             # 搜索失败时的降级策略
-            if engine == "jina":
+            if engine == "youcom":
+                logger.warning(f"⚠️ You.com search_list failed, falling back to jina: {query} ({e})")
+                try:
+                    return self.search_list(query, engine="jina", max_results=max_results, ttl=ttl, enrich=enrich)
+                except Exception as e2:
+                    logger.error(f"❌ Jina fallback (search_list) also failed for {query}: {e2}")
+            elif engine == "jina":
                 logger.warning(f"⚠️ Jina search_list failed, falling back to ddg: {query} ({e})")
                 try:
                     return self.search_list(query, engine="ddg", max_results=max_results, ttl=ttl, enrich=enrich)
