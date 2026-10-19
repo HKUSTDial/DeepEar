@@ -1,9 +1,11 @@
 import os
-from agno.models.openai import OpenAIChat
-from agno.models.ollama import Ollama
+
 from agno.models.dashscope import DashScope
 from agno.models.deepseek import DeepSeek
+from agno.models.ollama import Ollama
+from agno.models.openai import OpenAIChat
 from agno.models.openrouter import OpenRouter
+
 
 def get_model(model_provider: str, model_id: str, **kwargs):
     """
@@ -128,18 +130,25 @@ def get_model(model_provider: str, model_id: str, **kwargs):
             region, region_base_urls["global_en"]
         )
 
-        # Thinking (reasoning) support differs per model: MiniMax-M3 can switch
-        # between "adaptive" and "disabled", while MiniMax-M2.7 always reasons
-        # and cannot be toggled off. MINIMAX_THINKING may override the mode for
-        # models that allow it; unsupported values fall back to the default.
+        # Flash always uses adaptive thinking; M3 also supports disabling it.
+        # Unsupported values fall back to the model's default. Custom model IDs
+        # remain supported through the existing OpenAI-compatible transport.
         thinking_modes = {
+            "MiniMax-M3.1-Flash": ["adaptive"],
             "MiniMax-M3": ["adaptive", "disabled"],
-            "MiniMax-M2.7": ["always_on"],
         }
         supported_modes = thinking_modes.get(model_id, ["adaptive", "disabled"])
         thinking_mode = os.getenv("MINIMAX_THINKING", supported_modes[0])
         if thinking_mode not in supported_modes:
             thinking_mode = supported_modes[0]
+
+        if model_id == "MiniMax-M3.1-Flash":
+            effort = kwargs.pop(
+                "reasoning_effort", os.getenv("MINIMAX_REASONING_EFFORT", "max")
+            )
+            if effort not in ("low", "medium", "high", "xhigh", "max"):
+                effort = "max"
+            kwargs["reasoning_effort"] = effort
 
         # MiniMax uses the OpenAI-compatible standard role names.
         default_role_map = {
@@ -158,7 +167,7 @@ def get_model(model_provider: str, model_id: str, **kwargs):
             api_key=api_key,
             base_url=base_url,
             role_map=role_map,
-            extra_body={"enable_thinking": thinking_mode != "disabled"},
+            extra_body={"thinking": {"type": thinking_mode}},
             **kwargs
         )
 
